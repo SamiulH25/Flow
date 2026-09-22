@@ -42,6 +42,7 @@ qt_add_qml_module(flow
     VERSION 1.0
     QML_FILES
         qml/Main.qml
+        qml/Icon.qml
     SOURCES
         src/library.h src/library.cpp
         src/player.h src/player.cpp
@@ -50,6 +51,10 @@ qt_add_qml_module(flow
 
 # Window icon, embedded so it also works uninstalled.
 qt_add_resources(flow "icon" PREFIX "/" FILES data/flow.svg)
+# UI fonts (SIL OFL 1.1, licences next to them): the look must not depend on
+# what happens to be installed.
+qt_add_resources(flow "fonts" PREFIX "/" FILES
+    data/fonts/Inter.ttf data/fonts/SpaceGrotesk.ttf data/fonts/JetBrainsMono.ttf)
 
 target_compile_definitions(flow PRIVATE FLOW_VERSION="${PROJECT_VERSION}")
 target_link_libraries(flow PRIVATE flowcore Qt6::Quick Qt6::Multimedia Qt6::DBus)
@@ -58,6 +63,9 @@ install(TARGETS flow RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 configure_file(data/flow.desktop.in ${CMAKE_CURRENT_BINARY_DIR}/flow.desktop @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/flow.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES data/flow.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+# Licences of the fonts embedded in the binary.
+install(FILES data/fonts/Inter-OFL.txt data/fonts/SpaceGrotesk-OFL.txt data/fonts/JetBrainsMono-OFL.txt
+        DESTINATION ${CMAKE_INSTALL_DOCDIR}/fonts)
 
 if(FLOW_BUILD_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)

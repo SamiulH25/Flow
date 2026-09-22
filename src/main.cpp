@@ -4,6 +4,8 @@
 
 #include <QCommandLineParser>
 #include <QDir>
+#include <QFont>
+#include <QFontDatabase>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
@@ -23,6 +25,16 @@ int main(int argc, char *argv[])
     // Wayland app_id / X11 class: matches flow.desktop and MPRIS DesktopEntry.
     app.setDesktopFileName(QStringLiteral("flow"));
     app.setWindowIcon(QIcon::fromTheme(QStringLiteral("flow"), QIcon(QStringLiteral(":/data/flow.svg"))));
+
+    // Bundled UI fonts: Inter (body), Space Grotesk (display), JetBrains Mono (labels).
+    for (const char *font : {":/data/fonts/Inter.ttf", ":/data/fonts/SpaceGrotesk.ttf",
+                             ":/data/fonts/JetBrainsMono.ttf"}) {
+        if (QFontDatabase::addApplicationFont(QString::fromLatin1(font)) < 0)
+            qWarning() << "flow: could not load font" << font;
+    }
+    QFont body(QStringLiteral("Inter"));
+    body.setPixelSize(13);
+    app.setFont(body);
 
     QCommandLineParser cli;
     cli.setApplicationDescription(QStringLiteral("Flow — a local music player for FLAC, MP3 and WAV."));
