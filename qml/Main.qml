@@ -1,5 +1,5 @@
 // Flow — app shell. Library (TagLib → SQLite index) and Player (QMediaPlayer)
-// are C++ singletons from src/; mixes and the waveform are still decorative.
+// are C++ singletons from src/; Mpris (src/mpris.*) mirrors Player on D-Bus.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
@@ -40,8 +40,6 @@ ApplicationWindow {
     property bool tracksOnly: false   // "Tracks" hides the album strip that "Overview" shows
     property bool albumsFromGrid: false  // where "← BACK" from an album returns to
     property bool drawerOpen: true
-    // Decorative waveform, deterministic per track (real peaks need a decoder pass).
-    readonly property var peaks: makePeaks(Player.currentId)
 
     function fmtTime(s) {
         s = Math.max(0, Math.floor(s));
@@ -56,14 +54,6 @@ ApplicationWindow {
     }
     function nextMixName() {
         return "Mix " + (mixRepeater.count + 1);
-    }
-    function makePeaks(seed) {
-        const p = [];
-        for (let i = 0; i < 96; i++) {
-            const x = Math.sin(i * 127.1 + seed * 311.7) * 43758.5453;
-            p.push(0.25 + (x - Math.floor(x)) * 0.75);
-        }
-        return p;
     }
 
     Shortcut { sequence: "Space"; onActivated: Player.toggle() }
@@ -709,8 +699,11 @@ ApplicationWindow {
                             Repeater {
                                 model: 96
                                 Rectangle {
+                                    // Real loudness per bar once analysed; a flat line meanwhile.
+                                    readonly property real level: Player.peaks.length === 96 ? Player.peaks[index] : 0
                                     width: Math.max(1, (waveArea.width - 16 - 95 * 2) / 96)
-                                    height: peaks[index] * 60
+                                    height: 3 + level * 57
+                                    Behavior on height { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
                                     anchors.verticalCenter: parent.verticalCenter
                                     color: (index / 96) < progress ? acc : "#3f3f46"
                                 }

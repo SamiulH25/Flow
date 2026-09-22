@@ -152,6 +152,8 @@ public:
     const QList<Track> &tracks() const { return m_tracks; }
     const Track *trackById(qint64 id) const;
     const Track *trackByPath(const QString &path) const;
+    QByteArray cachedPeaks(qint64 id);
+    void storePeaks(qint64 id, const QByteArray &peaks);
 
     Q_INVOKABLE void rescan();
     Q_INVOKABLE void toggleLike(qint64 id);

@@ -216,6 +216,17 @@ const Track *Library::trackByPath(const QString &path) const
     return nullptr;
 }
 
+QByteArray Library::cachedPeaks(qint64 id)
+{
+    return m_db.isOpen() ? m_db.peaks(id) : QByteArray();
+}
+
+void Library::storePeaks(qint64 id, const QByteArray &peaks)
+{
+    if (m_db.isOpen() && m_indexById.contains(id) && !m_db.setPeaks(id, peaks))
+        qWarning().noquote() << "flow: could not cache waveform:" << m_db.lastError();
+}
+
 void Library::setError(const QString &error)
 {
     if (m_error == error)

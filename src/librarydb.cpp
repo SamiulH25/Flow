@@ -8,7 +8,7 @@
 #include <QSqlQuery>
 
 namespace {
-constexpr int kSchemaVersion = 2;
+constexpr int kSchemaVersion = 3;
 QAtomicInt s_connectionCounter;
 
 // A null QString binds as SQL NULL; the text columns are NOT NULL.
@@ -128,6 +128,8 @@ bool LibraryDb::migrate()
                  "CREATE INDEX IF NOT EXISTS playlist_tracks_by_list"
                  " ON playlist_tracks (playlist_id, position)"));
     }
+    if (ok && version < 3)
+        ok = exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN peaks BLOB"));   // waveform cache
     ok = ok && exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion)) && commit();
     if (!ok)
         db().rollback();
@@ -202,7 +204,8 @@ bool LibraryDb::upsert(const Track &t)
         " album_artist=excluded.album_artist, track_no=excluded.track_no,"
         " disc_no=excluded.disc_no, year=excluded.year, duration_ms=excluded.duration_ms,"
         " format=excluded.format, sample_rate=excluded.sample_rate, bits=excluded.bits,"
-        " bitrate=excluded.bitrate, channels=excluded.channels, cover=excluded.cover"));
+        " bitrate=excluded.bitrate, channels=excluded.channels, cover=excluded.cover,"
+        " peaks=NULL"));   // the file changed, so its cached waveform is stale
     q.bindValue(QStringLiteral(":path"), text(t.path));
     q.bindValue(QStringLiteral(":mtime"), t.mtime);
     q.bindValue(QStringLiteral(":size"), t.size);
@@ -246,6 +249,31 @@ bool LibraryDb::setLiked(qint64 id, bool liked)
     QSqlQuery q(db());
     q.prepare(QStringLiteral("UPDATE tracks SET liked = ? WHERE id = ?"));
     q.addBindValue(liked ? 1 : 0);
+    q.addBindValue(id);
+    if (!q.exec()) {
+        m_error = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+QByteArray LibraryDb::peaks(qint64 id)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("SELECT peaks FROM tracks WHERE id = ?"));
+    q.addBindValue(id);
+    if (!q.exec()) {
+        m_error = q.lastError().text();
+        return {};
+    }
+    return q.next() ? q.value(0).toByteArray() : QByteArray();
+}
+
+bool LibraryDb::setPeaks(qint64 id, const QByteArray &peaks)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("UPDATE tracks SET peaks = ? WHERE id = ?"));
+    q.addBindValue(peaks);
     q.addBindValue(id);
     if (!q.exec()) {
         m_error = q.lastError().text();

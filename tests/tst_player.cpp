@@ -98,6 +98,13 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(p.playing(), 5000);
     }
 
+    void waveformForCurrentTrack()
+    {
+        Player &p = *m_player;
+        QTRY_COMPARE_WITH_TIMEOUT(p.peaks().size(), 96, 10000);   // silent WAVs: all zero
+        QVERIFY(m_lib->cachedPeaks(p.currentId()).size() == 96);
+    }
+
     void pauseSeekPrevious()
     {
         Player &p = *m_player;

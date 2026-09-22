@@ -175,6 +175,8 @@ private slots:
         QVERIFY(db.open(m_db));
         const Track before = byName(db).value(QStringLiteral("plain.wav"));
         QVERIFY(db.setLiked(before.id, true));
+        QVERIFY(db.setPeaks(before.id, QByteArray(96, 'x')));
+        QCOMPARE(db.peaks(before.id), QByteArray(96, 'x'));
 
         LibraryScanner scanner(m_db, m_covers);
         auto r = scanner.scan(m_music);
@@ -193,6 +195,7 @@ private slots:
         QCOMPARE(after.addedAt, before.addedAt);
         QVERIFY(after.liked);
         QCOMPARE(after.title, QStringLiteral("Paper Suns"));
+        QVERIFY(db.peaks(after.id).isEmpty());   // stale waveform dropped with the edit
     }
 
     void missingRootLeavesIndexAlone()

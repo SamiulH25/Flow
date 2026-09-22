@@ -38,6 +38,8 @@ public:
     bool upsert(const Track &t);      // keeps id, liked and added_at of existing rows
     bool remove(const QString &path);
     bool setLiked(qint64 id, bool liked);
+    QByteArray peaks(qint64 id);                      // empty when not computed
+    bool setPeaks(qint64 id, const QByteArray &peaks);
 
     QList<Playlist> playlists();
     qint64 createPlaylist(const QString &name);   // -1 on failure

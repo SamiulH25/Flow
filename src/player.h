@@ -2,6 +2,7 @@
 
 #include "lyrics.h"
 #include "playqueue.h"
+#include "waveform.h"
 
 #include <QAudioOutput>
 #include <QMediaPlayer>
@@ -39,6 +40,7 @@ class Player : public QObject
     Q_PROPERTY(bool lyricsTimed READ lyricsTimed NOTIFY lyricsChanged)
     Q_PROPERTY(int lyricIndex READ lyricIndex NOTIFY lyricIndexChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
+    Q_PROPERTY(QVariantList peaks READ peaks NOTIFY peaksChanged)   // 0..1 per bar; empty while computing
 
 public:
     explicit Player(Library *library, QObject *parent = nullptr);
@@ -69,6 +71,7 @@ public:
     bool lyricsTimed() const { return m_lyrics.timed; }
     int lyricIndex() const { return m_lyricIndex; }
     QString error() const { return m_error; }
+    QVariantList peaks() const { return m_peaks; }
 
     // Replace the queue with `ids` (library track ids) and start at `start`.
     Q_INVOKABLE void playTracks(const QVariantList &ids, int start);
@@ -99,7 +102,8 @@ signals:
     void lyricsChanged();
     void lyricIndexChanged();
     void errorChanged();
-    void seeked(qreal seconds);   // explicit jumps only, not normal progress
+    void seeked(qreal seconds);
+    void peaksChanged();   // explicit jumps only, not normal progress
 
 private:
     void loadCurrent(bool autoplay);
@@ -113,6 +117,8 @@ private:
     void saveQueue() const;
     void restoreQueue();
     void setError(const QString &error);
+    void loadPeaks();
+    void setPeaks(const QByteArray &bars);
 
     static inline Player *s_instance = nullptr;
 
@@ -128,6 +134,8 @@ private:
     int m_errorStreak = 0;       // consecutive unplayable tracks, stops skip loops
     qint64 m_pendingSeekMs = -1; // restored position, applied once the media loads
     QTimer m_saveQueueTimer;
+    Waveform m_waveform;
+    QVariantList m_peaks;
     Lyrics m_lyrics;
     QVariantList m_lyricsList;
     int m_lyricIndex = -1;

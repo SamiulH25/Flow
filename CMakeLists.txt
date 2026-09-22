@@ -39,6 +39,7 @@ qt_add_qml_module(flow
     SOURCES
         src/library.h src/library.cpp
         src/player.h src/player.cpp
+        src/waveform.h src/waveform.cpp
 )
 
 target_link_libraries(flow PRIVATE flowcore Qt6::Quick Qt6::Multimedia Qt6::DBus)
@@ -54,13 +55,18 @@ if(FLOW_BUILD_TESTS)
         add_test(NAME ${name} COMMAND ${name})
     endforeach()
 
+    qt_add_executable(tst_waveform tests/tst_waveform.cpp src/waveform.h src/waveform.cpp)
+    target_include_directories(tst_waveform PRIVATE src)
+    target_link_libraries(tst_waveform PRIVATE Qt6::Multimedia Qt6::Test)
+    add_test(NAME tst_waveform COMMAND tst_waveform)
+
     qt_add_executable(tst_library tests/tst_library.cpp src/library.h src/library.cpp)
     target_link_libraries(tst_library PRIVATE flowcore Qt6::Qml Qt6::Test)
     add_test(NAME tst_library COMMAND tst_library)
 
     # Integration: real scan + QMediaPlayer playback (plays a few seconds of silence).
     qt_add_executable(tst_player tests/tst_player.cpp
-        src/library.h src/library.cpp src/player.h src/player.cpp)
+        src/library.h src/library.cpp src/player.h src/player.cpp src/waveform.h src/waveform.cpp)
     target_link_libraries(tst_player PRIVATE flowcore Qt6::Multimedia Qt6::Qml Qt6::Test)
     add_test(NAME tst_player COMMAND tst_player)
     set_tests_properties(tst_player PROPERTIES TIMEOUT 90)
@@ -68,7 +74,8 @@ if(FLOW_BUILD_TESTS)
     # MPRIS on a private session bus so the test never touches the desktop's.
     find_program(DBUS_RUN_SESSION dbus-run-session)
     qt_add_executable(tst_mpris tests/tst_mpris.cpp
-        src/library.h src/library.cpp src/player.h src/player.cpp src/mpris.h src/mpris.cpp)
+        src/library.h src/library.cpp src/player.h src/player.cpp src/waveform.h src/waveform.cpp
+        src/mpris.h src/mpris.cpp)
     target_link_libraries(tst_mpris PRIVATE flowcore Qt6::Multimedia Qt6::Qml Qt6::DBus Qt6::Test)
     if(DBUS_RUN_SESSION)
         add_test(NAME tst_mpris COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_mpris>)

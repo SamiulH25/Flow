@@ -55,27 +55,37 @@ Qt 6.11.2 (`base`, `declarative`, `multimedia` + `ffmpeg` backend, `wayland`, `s
 ```
 Flow/
   CMakeLists.txt
-  src/            # flowcore (static lib, no QML): track, librarydb (SQLite),
+  src/            # flowcore (static lib, no QML): track, librarydb (SQLite, schema v3),
                   #   libraryscanner (TagLib), lyrics (.lrc / embedded), playqueue
-                  # QML singletons: library (models, watcher, scan thread), player (QMediaPlayer)
+                  # QML singletons: library (views, mixes, watcher, scan thread),
+                  #   player (QMediaPlayer, queue persistence), waveform (QAudioDecoder)
+                  # mpris: org.mpris.MediaPlayer2 over QtDBus
   qml/Main.qml    # ports ui-demo.html v3; `import Flow` for Library / Player
-  tests/          # QtTest: tst_playqueue, tst_scanner, tst_lyrics, tst_player (real playback)
+  tests/          # QtTest: playqueue, scanner, lyrics, waveform, library, player, mpris
   STACK.md (this file)
   ui-demo.html    # clickable design spec (served via python http.server :8000)
 ```
 
 Build + test: `cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)`
+(tst_player / tst_waveform play or decode short silent WAVs; tst_mpris runs on a private
+bus via dbus-run-session.)
 Run: `build/flow --library=/path/to/music` (remembered; default `~/Music`).
 Index: `~/.local/share/Flow/Flow/library.db`, cover cache: `~/.cache/Flow/Flow/covers/`.
+Settings + saved queue: `~/.config/Flow/Flow.conf`.
 
-## Status
-Done:
-1. C++ Player (QMediaPlayer) + QML transport, seek, volume, shuffle/repeat, queue
-   (play next / add / remove / drag-reorder), synced lyrics, skip unplayable files.
-2. TagLib scan → SQLite → LibraryModel/AlbumModel → QML views; incremental rescans,
-   QFileSystemWatcher, likes persisted, embedded + folder cover art.
+## Status (v1 feature-complete)
+- Playback: QMediaPlayer transport, seek, volume, shuffle/repeat, queue (play next / add /
+  remove / drag-reorder), synced lyrics, unplayable files skipped, queue + position restored
+  on launch (paused).
+- Library: TagLib scan → SQLite, incremental rescans, QFileSystemWatcher, likes, embedded +
+  folder cover art, search / format filters / sorts.
+- Views: Overview, Albums grid → album detail, Tracks, Liked, mixes (create / rename /
+  delete, + MIX from any track, remove, drag-reorder). Deleted files leave mixes (FK cascade).
+- Waveform: real RMS overview per track, decoded at 8 kHz mono, cached in the index.
+- MPRIS: playerctl / Hyprland keybinds / shell widgets (metadata + art, seek, volume, loop,
+  shuffle, Raise, Quit).
 
-Next:
-3. MPRIS (`org.mpris.MediaPlayer2`) over QtDBus.
-4. Albums view + mixes/playlists (rail entries are still placeholders).
-5. Real waveform peaks (the drawer waveform is decorative), persist queue across restarts.
+Known gaps / ideas:
+- The rail (Albums, mixes) is hidden below ~820px wide; narrow windows have no way in yet.
+- No gapless playback (QtMultimedia limit, see above). No single-track repeat.
+- Mixes cannot be reordered in the rail; there is no import/export (M3U).

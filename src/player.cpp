@@ -45,6 +45,12 @@ Player::Player(Library *library, QObject *parent)
     connect(m_library, &Library::trackUpdated, this, &Player::onTrackUpdated);
     connect(m_library, &Library::reloaded, this, &Player::onLibraryReloaded);
 
+    connect(&m_waveform, &Waveform::ready, this, [this](qint64 id, const QByteArray &bars) {
+        m_library->storePeaks(id, bars);
+        if (id == currentId())
+            setPeaks(bars);
+    });
+
     // Save the queue shortly after edits (crash safety) and again on exit.
     m_saveQueueTimer.setSingleShot(true);
     m_saveQueueTimer.setInterval(1000);
@@ -221,9 +227,39 @@ void Player::loadCurrent(bool autoplay)
     emit currentChanged();
     emit durationChanged();
     emit positionChanged();
+    loadPeaks();
 
     if (t && autoplay)
         m_player.play();
+}
+
+void Player::loadPeaks()
+{
+    const Track *t = m_queue.current();
+    if (!t) {
+        setPeaks({});
+        return;
+    }
+    const QByteArray cached = m_library->cachedPeaks(t->id);
+    if (cached.size() == Waveform::kBars) {
+        setPeaks(cached);
+        return;
+    }
+    setPeaks({});
+    if (m_waveform.pendingTrack() != t->id)
+        m_waveform.request(t->id, t->path);
+}
+
+void Player::setPeaks(const QByteArray &bars)
+{
+    QVariantList peaks;
+    peaks.reserve(bars.size());
+    for (char b : bars)
+        peaks.append(quint8(b) / 255.0);
+    if (peaks == m_peaks)
+        return;
+    m_peaks = peaks;
+    emit peaksChanged();
 }
 
 void Player::updateLyricIndex()
