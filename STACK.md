@@ -73,6 +73,10 @@ Dev build + tests: `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug && cma
 bus via dbus-run-session.)
 Release + install: `cmake -S . -B build-release -G Ninja && cmake --build build-release &&
 sudo cmake --install build-release` — or on Arch: `cd packaging/arch && makepkg -si`.
+Per-user (no sudo, shows up in the Omarchy launcher): configure with
+`-DCMAKE_INSTALL_PREFIX=$HOME/.local`, then `cmake --install`; the desktop entry's Exec is
+absolute, so it does not depend on the launcher's PATH. The music folder can be picked in
+the app (Local library → CHANGE), so menu launches need no arguments.
 Run: `flow --library /path/to/music` (remembered; default `~/Music`). `flow --help`.
 Index: `~/.local/share/Flow/Flow/library.db`, cover cache: `~/.cache/Flow/Flow/covers/`.
 Settings + saved queue: `~/.config/Flow/Flow.conf`.
