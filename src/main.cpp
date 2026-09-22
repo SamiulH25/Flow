@@ -49,6 +49,7 @@ int main(int argc, char *argv[])
         musicDir = QDir(cli.value(libraryOption)).absolutePath();
         settings.setValue(QStringLiteral("library/dir"), musicDir);
     }
+    // Also changeable in the app ("Local library" card), which Library saves.
     if (musicDir.isEmpty())
         musicDir = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
 

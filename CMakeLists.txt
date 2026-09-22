@@ -55,7 +55,8 @@ target_compile_definitions(flow PRIVATE FLOW_VERSION="${PROJECT_VERSION}")
 target_link_libraries(flow PRIVATE flowcore Qt6::Quick Qt6::Multimedia Qt6::DBus)
 
 install(TARGETS flow RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES data/flow.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+configure_file(data/flow.desktop.in ${CMAKE_CURRENT_BINARY_DIR}/flow.desktop @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/flow.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES data/flow.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 
 if(FLOW_BUILD_TESTS)

@@ -11,6 +11,7 @@
 #include <QJSEngine>
 #include <QLocale>
 #include <QSet>
+#include <QSettings>
 #include <QStorageInfo>
 
 #include <algorithm>
@@ -236,6 +237,29 @@ void Library::setError(const QString &error)
     if (!error.isEmpty())
         qWarning().noquote() << "flow:" << error;
     emit errorChanged();
+}
+
+void Library::setMusicDir(const QString &dir)
+{
+    // Accept both paths and file:// URLs (FolderDialog hands out URLs).
+    const QUrl url(dir);
+    const QString path = url.isLocalFile() ? url.toLocalFile() : dir;
+    if (path.trimmed().isEmpty())
+        return;
+    const QString clean = QDir::cleanPath(QDir(path).absolutePath());
+    if (clean == m_musicDir)
+        return;
+    m_musicDir = clean;
+    QSettings().setValue(QStringLiteral("library/dir"), m_musicDir);
+    emit musicDirChanged();
+
+    reload();   // cached tracks under the new folder show up right away
+    if (m_scanThread) {
+        m_cancelScan = true;   // the running scan is for the old folder
+        m_rescanPending = true;
+    } else {
+        rescan();
+    }
 }
 
 void Library::setQuery(const QString &query)

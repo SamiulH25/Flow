@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QUrl>
+#include <QSettings>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
@@ -202,6 +203,28 @@ private slots:
                      .value(QStringLiteral("ok")).toBool());
 
         lib.deleteMix(imported);
+        lib.showMix(mix);
+    }
+
+    void switchingFolders()
+    {
+        Library &lib = *m_lib;
+        qputenv("XDG_CONFIG_HOME", m_tmp.filePath(QStringLiteral("config")).toUtf8());
+        const QString other = m_tmp.filePath(QStringLiteral("other"));
+        QVERIFY(QDir().mkpath(other));
+        QVERIFY(writeTaggedWav(other + QStringLiteral("/z.wav"), "Elsewhere", "Gamma", 1));
+        const qint64 mix = lib.viewMixId();
+
+        lib.setMusicDir(QUrl::fromLocalFile(other).toString());   // as FolderDialog passes it
+        QCOMPARE(lib.musicDir(), QDir(other).absolutePath());
+        QTRY_VERIFY_WITH_TIMEOUT(!lib.scanning() && lib.totalCount() == 1, 10000);
+        QCOMPARE(lib.tracks().first().title, QStringLiteral("Elsewhere"));
+        QCOMPARE(QSettings().value(QStringLiteral("library/dir")).toString(), QDir(other).absolutePath());
+
+        lib.setMusicDir(m_music);   // back: the old tracks and mixes are all still there
+        QTRY_VERIFY_WITH_TIMEOUT(!lib.scanning(), 10000);
+        QCOMPARE(lib.totalCount(), 3);
+        QCOMPARE(lib.mixTrackIds(mix).size(), 2);
         lib.showMix(mix);
     }
 

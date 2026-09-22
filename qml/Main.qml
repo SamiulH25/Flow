@@ -196,6 +196,16 @@ ApplicationWindow {
     }
 
     // ---- M3U import / export + a short status toast ----
+    FolderDialog {
+        id: folderDialog
+        title: "Choose your music folder"
+        currentFolder: "file://" + Library.musicDir
+        onAccepted: {
+            Library.musicDir = selectedFolder;   // accepts the file:// URL
+            goTo("overview");
+            showToast("Scanning " + Library.musicDir + "…");
+        }
+    }
     FileDialog {
         id: importDialog
         title: "Import playlist"
@@ -430,10 +440,16 @@ ApplicationWindow {
                 }
                 Item { width: 1; height: 12 }
                 Rectangle {
-                    width: parent.width; height: 76; radius: 11; color: panel; border.color: line; border.width: 1
+                    width: parent.width; height: 92; radius: 11; color: panel; border.color: cardHover.containsMouse ? line2 : line; border.width: 1
+                    MouseArea { id: cardHover; anchors.fill: parent; hoverEnabled: true; onClicked: folderDialog.open() }
                     Column {
                         anchors { fill: parent; margins: 12 } spacing: 4
-                        Text { text: "Local library"; color: ink; font.pixelSize: 12; font.bold: true }
+                        Item {
+                            width: parent.width; height: libTitle.implicitHeight
+                            Text { id: libTitle; text: "Local library"; color: ink; font.pixelSize: 12; font.bold: true }
+                            Text { anchors.right: parent.right; text: "CHANGE"; color: cardHover.containsMouse ? ink : dim; font.pixelSize: 10; font.family: mono }
+                        }
+                        Text { width: parent.width; text: Library.musicDir; color: mut; font.pixelSize: 11; font.family: mono; elide: Text.ElideMiddle }
                         Text { width: parent.width; text: Library.storageText; color: mut; font.pixelSize: 11; elide: Text.ElideRight }
                         Rectangle {
                             width: parent.width; height: 4; radius: 2; color: "#26262e"
@@ -716,8 +732,15 @@ ApplicationWindow {
                         text: parent.emptyMix ? "Hover any track and use + MIX to add it here."
                             : Library.totalCount > 0 ? "Try another search or filter."
                             : Library.error !== "" ? Library.error
-                            : "Flow reads FLAC, MP3 and WAV from " + Library.musicDir
-                              + ".\nStart it with --library=/path/to/music to use another folder."
+                            : "Flow plays the FLAC, MP3 and WAV files in " + Library.musicDir + "."
+                    }
+                    Rectangle {
+                        visible: !parent.emptyMix && Library.totalCount === 0 && !Library.scanning
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        height: 34; width: chooseLabel.implicitWidth + 32; radius: 17
+                        color: chooseHover.containsMouse ? ink : acc
+                        Text { id: chooseLabel; anchors.centerIn: parent; text: "CHOOSE MUSIC FOLDER"; color: "#000"; font.pixelSize: 11; font.family: mono; font.bold: true }
+                        MouseArea { id: chooseHover; anchors.fill: parent; hoverEnabled: true; onClicked: folderDialog.open() }
                     }
                 }
             }

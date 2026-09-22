@@ -3,7 +3,9 @@ Type=Application
 Name=Flow
 GenericName=Music Player
 Comment=Play your local FLAC, MP3 and WAV library
-Exec=flow
+# Absolute path: launchers do not always share the login shell's PATH.
+TryExec=@CMAKE_INSTALL_FULL_BINDIR@/flow
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/flow
 Icon=flow
 Terminal=false
 Categories=AudioVideo;Audio;Player;Qt;

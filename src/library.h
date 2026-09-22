@@ -114,7 +114,7 @@ class Library : public QObject
     Q_PROPERTY(int likedCount READ likedCount NOTIFY countsChanged)
     Q_PROPERTY(bool scanning READ scanning NOTIFY scanningChanged)
     Q_PROPERTY(int scanProgress READ scanProgress NOTIFY scanProgressChanged)
-    Q_PROPERTY(QString musicDir READ musicDir CONSTANT)
+    Q_PROPERTY(QString musicDir READ musicDir WRITE setMusicDir NOTIFY musicDirChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
     Q_PROPERTY(QString storageText READ storageText NOTIFY countsChanged)
     Q_PROPERTY(qreal storageUsed READ storageUsed NOTIFY countsChanged)
@@ -147,6 +147,9 @@ public:
     bool scanning() const { return m_scanThread != nullptr; }
     int scanProgress() const { return m_scanProgress; }
     QString musicDir() const { return m_musicDir; }
+    // Switches the library folder: shows what is already indexed there, then
+    // rescans. Other folders' tracks (and their likes / mixes) stay in the index.
+    void setMusicDir(const QString &dir);
     QString error() const { return m_error; }
     QString storageText() const { return m_storageText; }
     qreal storageUsed() const { return m_storageUsed; }
@@ -191,6 +194,7 @@ signals:
     void trackUpdated(qint64 id);   // metadata or liked changed
     void reloaded();                // whole library reloaded from the database
     void viewChanged();
+    void musicDirChanged();
 
 private:
     void reload();
