@@ -170,8 +170,11 @@ private slots:
 
         set(kPlayer, QStringLiteral("Volume"), 0.25);
         QCOMPARE(m_player->volume(), 0.25);
+        set(kPlayer, QStringLiteral("LoopStatus"), QStringLiteral("Track"));
+        QCOMPARE(m_player->repeatMode(), int(Player::RepeatOne));
+        QCOMPARE(get(kPlayer, QStringLiteral("LoopStatus")).toString(), QStringLiteral("Track"));
         set(kPlayer, QStringLiteral("LoopStatus"), QStringLiteral("Playlist"));
-        QVERIFY(m_player->repeat());
+        QCOMPARE(m_player->repeatMode(), int(Player::RepeatAll));
         set(kPlayer, QStringLiteral("Shuffle"), true);
         QVERIFY(m_player->shuffle());
         set(kPlayer, QStringLiteral("Shuffle"), false);

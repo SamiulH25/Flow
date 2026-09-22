@@ -36,6 +36,7 @@ class Player : public QObject
     Q_PROPERTY(qreal volume READ volume WRITE setVolume NOTIFY volumeChanged)
     Q_PROPERTY(bool shuffle READ shuffle WRITE setShuffle NOTIFY shuffleChanged)
     Q_PROPERTY(bool repeat READ repeat WRITE setRepeat NOTIFY repeatChanged)
+    Q_PROPERTY(int repeatMode READ repeatMode WRITE setRepeatMode NOTIFY repeatChanged)
     Q_PROPERTY(QVariantList lyrics READ lyrics NOTIFY lyricsChanged)
     Q_PROPERTY(bool lyricsTimed READ lyricsTimed NOTIFY lyricsChanged)
     Q_PROPERTY(int lyricIndex READ lyricIndex NOTIFY lyricIndexChanged)
@@ -65,7 +66,11 @@ public:
     void setVolume(qreal volume);
     bool shuffle() const { return m_queue.isShuffled(); }
     void setShuffle(bool on);
-    bool repeat() const { return m_repeat; }
+    // 0 off, 1 whole queue, 2 current track. `repeat` is the queue-level view of it.
+    enum RepeatMode { RepeatOff = 0, RepeatAll = 1, RepeatOne = 2 };
+    bool repeat() const { return m_repeatMode != RepeatOff; }
+    int repeatMode() const { return m_repeatMode; }
+    void setRepeatMode(int mode);
     void setRepeat(bool on);
     QVariantList lyrics() const { return m_lyricsList; }
     bool lyricsTimed() const { return m_lyrics.timed; }
@@ -130,7 +135,7 @@ private:
     quint64 m_loadedUid = 0;     // queue entry currently in m_player
     QVariantMap m_currentMap;
     qreal m_volume = 0.7;
-    bool m_repeat = false;
+    int m_repeatMode = RepeatOff;
     int m_errorStreak = 0;       // consecutive unplayable tracks, stops skip loops
     qint64 m_pendingSeekMs = -1; // restored position, applied once the media loads
     QTimer m_saveQueueTimer;

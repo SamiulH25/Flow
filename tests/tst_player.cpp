@@ -149,6 +149,21 @@ private slots:
         p.setRepeat(false);
     }
 
+    void repeatOneReplaysTrack()
+    {
+        Player &p = *m_player;
+        const int index = p.queueIndex();
+        p.setRepeatMode(Player::RepeatOne);
+        QVERIFY(p.repeat());
+        p.seek(p.duration() - 0.3);
+        p.play();
+        QTRY_VERIFY_WITH_TIMEOUT(p.position() < 0.5 && p.playing(), 5000);   // rewound, still playing
+        QCOMPARE(p.queueIndex(), index);
+        p.next();                                                              // manual skips still move
+        QCOMPARE(p.queueIndex(), (index + 1) % p.queueCount());
+        p.setRepeatMode(Player::RepeatOff);
+    }
+
     void queueEditsKeepPlayback()
     {
         Player &p = *m_player;

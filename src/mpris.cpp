@@ -202,13 +202,21 @@ QString MprisPlayerAdaptor::playbackStatus() const
 
 QString MprisPlayerAdaptor::loopStatus() const
 {
-    return m_mpris->player()->repeat() ? QStringLiteral("Playlist") : QStringLiteral("None");
+    switch (m_mpris->player()->repeatMode()) {
+    case Player::RepeatAll: return QStringLiteral("Playlist");
+    case Player::RepeatOne: return QStringLiteral("Track");
+    }
+    return QStringLiteral("None");
 }
 
 void MprisPlayerAdaptor::setLoopStatus(const QString &status)
 {
-    // No single-track repeat; "Track" loops the queue like "Playlist".
-    m_mpris->player()->setRepeat(status != u"None");
+    if (status == u"Track")
+        m_mpris->player()->setRepeatMode(Player::RepeatOne);
+    else if (status == u"Playlist")
+        m_mpris->player()->setRepeatMode(Player::RepeatAll);
+    else if (status == u"None")
+        m_mpris->player()->setRepeatMode(Player::RepeatOff);
 }
 
 bool MprisPlayerAdaptor::shuffle() const

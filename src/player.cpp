@@ -21,7 +21,9 @@ Player::Player(Library *library, QObject *parent)
 
     const QSettings settings;
     m_volume = qBound(0.0, settings.value(QStringLiteral("player/volume"), 0.7).toDouble(), 1.0);
-    m_repeat = settings.value(QStringLiteral("player/repeat"), false).toBool();
+    // "player/repeat" (bool) predates repeat-one; read it as off / all.
+    const int legacy = settings.value(QStringLiteral("player/repeat"), false).toBool() ? RepeatAll : RepeatOff;
+    m_repeatMode = qBound(0, settings.value(QStringLiteral("player/repeatMode"), legacy).toInt(), 2);
     m_queue.setShuffled(settings.value(QStringLiteral("player/shuffle"), false).toBool());
     m_audio.setVolume(QtAudio::convertVolume(float(m_volume), QtAudio::LogarithmicVolumeScale,
                                              QtAudio::LinearVolumeScale));
@@ -151,7 +153,8 @@ void Player::saveSettings() const
 {
     QSettings settings;
     settings.setValue(QStringLiteral("player/volume"), m_volume);
-    settings.setValue(QStringLiteral("player/repeat"), m_repeat);
+    settings.setValue(QStringLiteral("player/repeatMode"), m_repeatMode);
+    settings.remove(QStringLiteral("player/repeat"));
     settings.setValue(QStringLiteral("player/shuffle"), m_queue.isShuffled());
 }
 
@@ -179,9 +182,16 @@ void Player::setShuffle(bool on)
 
 void Player::setRepeat(bool on)
 {
-    if (on == m_repeat)
+    if (on != repeat())
+        setRepeatMode(on ? RepeatAll : RepeatOff);
+}
+
+void Player::setRepeatMode(int mode)
+{
+    mode = qBound(0, mode, 2);
+    if (mode == m_repeatMode)
         return;
-    m_repeat = on;
+    m_repeatMode = mode;
     saveSettings();
     emit repeatChanged();
 }
@@ -285,7 +295,11 @@ void Player::onMediaStatus(QMediaPlayer::MediaStatus status)
     }
     if (status != QMediaPlayer::EndOfMedia)
         return;
-    const int next = m_queue.nextIndex(m_repeat);
+    if (m_repeatMode == RepeatOne) {
+        loadCurrent(true);   // same entry: rewinds and plays again
+        return;
+    }
+    const int next = m_queue.nextIndex(m_repeatMode == RepeatAll);
     if (next < 0) {
         m_player.stop();   // end of queue: park at the start of the last track
         return;
@@ -399,7 +413,7 @@ void Player::stop()
 
 void Player::next()
 {
-    const int next = m_queue.nextIndex(m_repeat);
+    const int next = m_queue.nextIndex(repeat());
     if (next < 0) {
         m_player.stop();
         return;
@@ -410,7 +424,7 @@ void Player::next()
 
 void Player::previous()
 {
-    const int prev = m_queue.previousIndex(m_repeat);
+    const int prev = m_queue.previousIndex(repeat());
     if (position() > kRestartThreshold || prev < 0) {
         seek(0);
         return;

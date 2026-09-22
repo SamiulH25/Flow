@@ -896,7 +896,8 @@ ApplicationWindow {
                     border.width: 1
                     Text {
                         anchors.centerIn: parent
-                        text: modelData.k === "play" ? (Player.playing ? "❚❚" : "▶") : modelData.t
+                        text: modelData.k === "play" ? (Player.playing ? "❚❚" : "▶")
+                            : modelData.k === "rp" && Player.repeatMode === 2 ? "↻1" : modelData.t
                         color: modelData.k === "play" ? "#000" : lit ? acc : "#d8d5cb"
                         font.pixelSize: modelData.k === "q" || modelData.k === "l" ? 10 : 14
                         font.family: mono
@@ -909,7 +910,7 @@ ApplicationWindow {
                             else if (modelData.k === "prev") Player.previous();
                             else if (modelData.k === "next") Player.next();
                             else if (modelData.k === "sh") Player.shuffle = !Player.shuffle;
-                            else if (modelData.k === "rp") Player.repeat = !Player.repeat;
+                            else if (modelData.k === "rp") Player.repeatMode = (Player.repeatMode + 1) % 3;   // off → all → one
                             else if (modelData.k === "q") { drawerTab = "queue"; drawerOpen = true; }
                             else if (modelData.k === "l") { drawerTab = "lyrics"; drawerOpen = true; }
                         }
