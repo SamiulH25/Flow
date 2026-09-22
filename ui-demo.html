@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Flow — UI Demo v3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root{
+    --bg:#0b0b0e; --panel:#121216; --panel2:#17171d;
+    --line:#222228; --line2:#2e2e37;
+    --ink:#f4f1ea; --mut:#9b978c; --dim:#5e5c55;
+    --acc:#d9ff3d; --acc-ink:#101204;
+    --disp:"Space Grotesk",Inter,ui-sans-serif,system-ui,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  ::selection{ background:var(--acc); color:#000; }
+  body{ font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    background:var(--bg); color:var(--ink); height:100vh; overflow:hidden; overflow-x:clip;
+    display:flex; flex-direction:column; -webkit-font-smoothing:antialiased; }
+  body::before{ content:""; position:fixed; inset:0; pointer-events:none; opacity:.045; z-index:60;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.9'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E"); }
+  button{ font-family:inherit; }
+  /* chrome */
+  .chrome{ display:flex; align-items:center; gap:14px; padding:11px 18px; border-bottom:1px solid var(--line); flex-shrink:0; }
+  .dots{ display:flex; gap:7px; } .dots i{ width:11px; height:11px; border-radius:50%; background:#2c2c34; display:block; }
+  .crumb{ font-size:13px; color:var(--mut); white-space:nowrap; } .crumb b{ color:var(--ink); }
+  .search{ margin-left:auto; margin-right:auto; width:min(460px,42vw); display:flex; align-items:center; gap:9px;
+    background:var(--panel); border:1px solid var(--line); border-radius:99px; padding:8px 14px; cursor:text; }
+  .search input{ background:none; border:none; outline:none; color:var(--ink); width:100%; font-size:13px; }
+  .search input::placeholder{ color:var(--dim); }
+  .search kbd{ font-family:var(--mono); font-size:10px; color:var(--dim); border:1px solid var(--line2); border-radius:6px; padding:2px 6px; }
+  .avatar{ width:30px; height:30px; border-radius:50%; background:linear-gradient(135deg,#e8e4d8,#8a877e); color:#111; display:grid; place-items:center; font-size:12px; font-weight:700; flex-shrink:0; }
+  /* layout */
+  .app{ display:grid; grid-template-columns:224px minmax(0,1fr) 322px; flex:1; min-height:0; }
+  .app>*{ min-width:0; }
+  .rail{ border-right:1px solid var(--line); padding:16px 12px; display:flex; flex-direction:column; gap:2px; overflow:auto; }
+  .sec{ font-family:var(--mono); font-size:10px; letter-spacing:.14em; color:var(--dim); padding:14px 10px 7px; display:flex; justify-content:space-between; align-items:center; }
+  .sec button{ background:none; border:none; color:var(--dim); font-family:var(--mono); font-size:10px; cursor:pointer; } .sec button:hover{ color:var(--ink); }
+  .ri{ display:flex; align-items:center; gap:11px; padding:8px 10px; border-radius:9px; font-size:13.5px; color:#cfccc2; cursor:pointer; border:none; background:none; width:100%; text-align:left; }
+  .ri:hover{ background:#1a1a20; color:#fff; } .ri.on{ background:#1e1e25; color:#fff; }
+  .ri .n{ margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--dim); } .ri.on .n{ color:var(--acc); }
+  .ri .sw{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .meter{ margin:auto 10px 2px; border:1px solid var(--line); border-radius:11px; padding:12px; background:var(--panel); font-size:11px; color:var(--mut); }
+  .meter b{ font-size:12px; color:var(--ink); } .bar{ height:4px; background:#26262e; border-radius:99px; margin-top:9px; overflow:hidden; } .bar i{ display:block; height:100%; width:64%; background:var(--acc); }
+  /* center */
+  .center{ overflow:auto; overflow-x:clip; padding:18px clamp(12px,3vw,26px) 16px; min-width:0; }
+  .listhead{ display:flex; align-items:baseline; gap:12px; margin-bottom:10px; }
+  .listhead b{ font-size:19px; letter-spacing:-.02em; font-family:var(--disp); font-weight:700; }
+  .crumb b, .album b, .np h2, .dleft b, .tt b, .qi b{ font-family:var(--disp); letter-spacing:-.01em; }
+  .listhead span{ font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; color:var(--dim); margin-left:auto; }
+  .toolbar{ display:flex; gap:8px; align-items:center; margin-bottom:14px; flex-wrap:wrap; position:sticky; top:-18px; padding:12px 0; background:linear-gradient(var(--bg) 82%, transparent); z-index:5; }
+  .chip{ font-size:12px; padding:7px 13px; border-radius:99px; border:1px solid var(--line2); background:var(--panel); cursor:pointer; color:#cfccc2; }
+  .chip.on{ background:var(--ink); color:#000; font-weight:700; border-color:var(--ink); }
+  .toolbar select{ margin-left:auto; background:var(--panel); color:var(--ink); border:1px solid var(--line2); border-radius:9px; padding:7px 10px; font-size:12px; font-family:var(--mono); }
+  /* album strip with Qobuz badges */
+  .strip{ display:grid; grid-template-columns:repeat(auto-fill,minmax(min(150px,100%),1fr)); gap:14px; margin-bottom:20px; }
+  .album{ cursor:pointer; } .album .cov{ aspect-ratio:1; border-radius:10px; border:1px solid var(--line2); position:relative; overflow:hidden; }
+  .album .cov::after{ content:"▶"; position:absolute; right:10px; bottom:10px; width:34px; height:34px; border-radius:50%; background:var(--acc); color:var(--acc-ink); display:grid; place-items:center; font-size:12px; opacity:0; transform:translateY(6px); transition:.18s; }
+  .album:hover .cov::after{ opacity:1; transform:none; }
+  .album b{ display:block; font-size:13px; margin-top:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .album span{ font-size:12px; color:var(--mut); }
+  .badge{ position:absolute; left:8px; top:8px; display:flex; gap:5px; }
+  .badge em{ font-style:normal; font-family:var(--mono); font-size:9px; letter-spacing:.06em; background:rgba(0,0,0,.62); color:#fff; padding:3px 7px; border-radius:99px; backdrop-filter:blur(6px); }
+  .badge em.hi{ background:var(--acc); color:var(--acc-ink); font-weight:700; }
+  .a1{ background:radial-gradient(circle at 30% 20%,#e8e2d2 0 18%,transparent 19%),radial-gradient(circle at 75% 70%,#3f3f46 0 24%,transparent 25%),linear-gradient(160deg,#1e1e25,#0e0e12); }
+  .a2{ background:repeating-linear-gradient(90deg,#232329 0 6px,#16161b 6px 12px),radial-gradient(circle at 70% 30%,#b7ab8e 0 26%,transparent 27%); }
+  .a3{ background:radial-gradient(circle at 50% 112%,#d9ff3d 0 44%,transparent 45%),linear-gradient(#e8e4d8,#c4bfb0); }
+  .a4{ background:conic-gradient(from 40deg at 60% 40%,#1c1c22,#34343d,#1c1c22); }
+  .a5{ background:linear-gradient(#191920,#0f0f13); } .a5::before{ content:""; position:absolute; inset:24%; border:1.5px solid #d9ff3d; border-radius:50%; }
+  .a6{ background:repeating-linear-gradient(0deg,#e3ded0 0 10px,#141419 10px 11px); }
+  .a7{ background:radial-gradient(circle at 22% 78%,#8a877e 0 30%,transparent 31%),radial-gradient(circle at 80% 20%,#e8e4d8 0 18%,transparent 19%),#141419; }
+  .a8{ background:linear-gradient(135deg,#26262e,#111116); } .a8::before{ content:""; position:absolute; left:18%; right:18%; top:46%; height:1.5px; background:#d9ff3d; transform:rotate(-12deg); }
+  .cov{ position:relative; }
+  /* track table */
+  .thead,.trow{ display:grid; grid-template-columns:32px minmax(0,1fr) 170px 60px 118px 30px; gap:10px; align-items:center; padding-left:12px; padding-right:12px; }
+  .thead>*,.trow>*{ min-width:0; }
+  .thead{ font-family:var(--mono); font-size:10px; letter-spacing:.12em; color:var(--dim); padding-top:9px; padding-bottom:9px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  .thead span:nth-child(4){ text-align:right; }
+  .trow{ padding-top:8px; padding-bottom:8px; border-bottom:1px solid #141419; border-radius:9px; cursor:pointer; font-size:13.5px; position:relative; }
+  .trow:hover{ background:#141419; } .trow.play{ background:#151a0e; } .trow.play:hover{ background:#171d10; }
+  .idx{ font-family:var(--mono); font-size:12px; color:var(--dim); } .trow.play .idx{ color:var(--acc); }
+  .tt b{ display:block; font-weight:550; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .tt span{ color:var(--mut); font-size:12px; }
+  .tal{ color:var(--mut); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dur{ font-family:var(--mono); font-size:12px; color:var(--mut); text-align:right; }
+  .mini-wave{ height:22px; display:flex; align-items:center; gap:1.5px; }
+  .mini-wave i{ width:2px; background:#3a3a42; border-radius:2px; display:block; } .trow.play .mini-wave i.played{ background:var(--acc); }
+  .heart{ background:none; border:none; color:var(--dim); cursor:pointer; font-size:15px; } .heart.liked{ color:var(--acc); }
+  .rowacts{ position:absolute; right:38px; top:50%; translate:0 -50%; display:none; gap:6px; }
+  .trow:hover .rowacts{ display:flex; }
+  .rowacts button{ font-size:11px; font-family:var(--mono); background:#22222a; color:var(--ink); border:1px solid var(--line2); border-radius:7px; padding:4px 8px; cursor:pointer; }
+  .rowacts button:hover{ background:var(--acc); color:#000; border-color:var(--acc); }
+  .empty{ padding:40px; text-align:center; color:var(--dim); font-size:13px; border:1px dashed var(--line2); border-radius:12px; margin-top:12px; }
+  /* right panel with tabs */
+  .np{ border-left:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; min-height:0; }
+  .tabs{ display:flex; gap:4px; padding:12px 12px 0; }
+  .tab{ flex:1; font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; padding:9px 0; border-radius:9px 9px 0 0; border:1px solid transparent; border-bottom:none; background:none; color:var(--dim); cursor:pointer; }
+  .tab.on{ background:#0e0e12; color:var(--ink); border-color:var(--line); }
+  .npbody{ flex:1; overflow:auto; border-top:1px solid var(--line); padding:16px 14px; display:flex; flex-direction:column; gap:13px; background:#0e0e12; margin:0 12px 12px; border:1px solid var(--line); border-top:none; border-radius:0 0 12px 12px; }
+  .big{ aspect-ratio:1; border-radius:10px; border:1px solid var(--line2); position:relative; overflow:hidden; flex-shrink:0; }
+  .np h2{ font-size:19px; letter-spacing:-.02em; } .np .by{ color:var(--mut); font-size:12.5px; margin-top:3px; }
+  .specs{ display:flex; gap:6px; flex-wrap:wrap; }
+  .specs em{ font-style:normal; font-family:var(--mono); font-size:10px; border:1px solid var(--line2); color:#cfccc2; border-radius:7px; padding:4px 8px; background:#131318; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .specs em.hi{ background:var(--acc); color:#000; border-color:var(--acc); font-weight:700; }
+  .wavelabel{ font-family:var(--mono); font-size:10px; letter-spacing:.12em; color:var(--dim); display:flex; justify-content:space-between; }
+  #wave{ width:100%; height:76px; display:block; background:#0a0a0d; border:1px solid var(--line); border-radius:10px; cursor:pointer; }
+  /* art thumbs: positioned container so ::before art stays inside */
+  .mini{ position:relative; overflow:hidden; }
+  /* queue groups */
+  .mini{ position:relative; overflow:hidden; }
+  .qgroup{ border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .qgroup h5{ font-size:11px; padding:8px 10px; background:#15151b; color:var(--mut); font-weight:600; display:flex; gap:8px; align-items:center; }
+  .qgroup h5 b{ color:var(--ink); } .qgroup h5 span{ margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--dim); }
+  .qi{ display:flex; gap:9px; align-items:center; padding:7px 10px; cursor:grab; background:#0e0e12; border-top:1px solid #1a1a20; font-size:12.5px; }
+  .qi:hover{ background:#15151b; } .qi.drag{ opacity:.4; } .qi.cur{ background:#151a0e; }
+  .qi .grip{ color:var(--dim); font-size:12px; cursor:grab; } .qi .mini{ width:30px; height:30px; border-radius:6px; flex-shrink:0; border:1px solid var(--line2); }
+  .qi b{ display:block; font-size:12.5px; } .qi span{ font-size:11px; color:var(--mut); } .qi .qd{ margin-left:auto; font-family:var(--mono); font-size:10.5px; color:var(--dim); }
+  /* lyrics */
+  .lyr{ font-size:13.5px; line-height:2; color:var(--dim); } .lyr p{ padding:2px 8px; border-radius:7px; }
+  .lyr p.cur{ color:var(--ink); background:#1a1a20; } .lyr p.past{ color:var(--mut); }
+  /* dock */
+  .dockwrap{ border-top:1px solid var(--line); background:rgba(11,11,14,.94); backdrop-filter:blur(16px); padding:10px 16px 12px; flex-shrink:0; }
+  #seek{ height:14px; display:flex; align-items:center; cursor:pointer; margin-bottom:6px; }
+  #seekTrack{ height:5px; background:#232329; border-radius:99px; width:100%; position:relative; }
+  #seekFill{ height:100%; width:20%; background:var(--acc); border-radius:99px; position:relative; }
+  #seekFill::after{ content:""; position:absolute; right:-6px; top:50%; translate:0 -50%; width:12px; height:12px; border-radius:50%; background:var(--acc); border:3px solid #0b0b0e; box-shadow:0 0 0 1px var(--acc); opacity:0; }
+  #seek:hover #seekFill::after{ opacity:1; }
+  .dock{ display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:12px; }
+  .dleft{ display:flex; gap:11px; align-items:center; min-width:0; }
+  .dleft .mini{ width:42px; height:42px; border-radius:8px; border:1px solid var(--line2); flex-shrink:0; }
+  .dleft b{ font-size:13px; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px; }
+  .dleft span{ font-size:12px; color:var(--mut); }
+  .dctl{ display:flex; align-items:center; gap:6px; }
+  .ibtn{ min-width:36px; height:36px; border-radius:50%; border:1px solid transparent; background:none; color:#d8d5cb; cursor:pointer; display:grid; place-items:center; padding:0 8px; font-family:var(--mono); font-size:10px; }
+  .ibtn:hover{ background:#1c1c22; color:#fff; } .ibtn.on{ color:var(--acc); border-color:#3d4420; background:#151a0e; }
+  .play{ width:44px; height:44px; border-radius:50%; background:var(--ink); color:#000; border:none; cursor:pointer; display:grid; place-items:center; }
+  .play:hover{ background:var(--acc); }
+  .dright{ display:flex; align-items:center; gap:10px; justify-content:flex-end; font-family:var(--mono); font-size:11px; color:var(--mut); }
+  #vol{ width:96px; height:14px; display:flex; align-items:center; cursor:pointer; } #volTrack{ height:4px; background:#26262e; border-radius:99px; width:100%; } #volFill{ height:100%; width:70%; background:#d8d5cb; border-radius:99px; }
+  /* palette */
+  #palWrap{ position:fixed; inset:0; background:rgba(0,0,0,.55); backdrop-filter:blur(4px); display:none; place-items:start center; z-index:100; padding-top:12vh; }
+  #palWrap.open{ display:grid; }
+  #pal{ width:min(560px,90vw); background:#141419; border:1px solid var(--line2); border-radius:14px; overflow:hidden; box-shadow:0 30px 80px rgba(0,0,0,.6); }
+  #palInput{ width:100%; background:none; border:none; outline:none; color:var(--ink); font-size:15px; padding:16px 18px; border-bottom:1px solid var(--line); }
+  #palList{ max-height:320px; overflow:auto; padding:8px; }
+  .pi{ display:flex; gap:11px; align-items:center; padding:9px 11px; border-radius:9px; cursor:pointer; font-size:13px; }
+  .pi.sel, .pi:hover{ background:#1e1e25; } .pi .k{ margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--dim); }
+  .pi .mini{ width:30px; height:30px; border-radius:7px; border:1px solid var(--line2); flex-shrink:0; }
+  .psec{ font-family:var(--mono); font-size:10px; letter-spacing:.12em; color:var(--dim); padding:10px 11px 4px; }
+  @media (max-width:1080px){
+    .app{ grid-template-columns:200px minmax(0,1fr); }
+    /* now-playing becomes a slide-over drawer so queue/lyrics stay reachable */
+    .np{ display:flex; position:fixed; top:0; right:0; bottom:0; width:min(340px,92vw); z-index:80;
+      border-left:1px solid var(--line2); box-shadow:-20px 0 60px rgba(0,0,0,.55);
+      transform:translateX(105%); transition:transform .25s ease; }
+    body.np-open .np{ transform:none; }
+    .thead,.trow{ grid-template-columns:28px minmax(0,1fr) 56px 28px; }
+    .thead span:nth-child(3),.thead span:nth-child(5){ display:none; }
+    .tal,.mini-wave{ display:none; }
+  }
+  @media (max-width:820px){
+    .app{ grid-template-columns:minmax(0,1fr); } .rail{ display:none; }
+    .search{ width:auto; flex:1; min-width:0; }
+    .dright #vol{ display:none; }
+    .dleft b{ max-width:160px; }
+  }
+  @media (max-width:560px){
+    .dots, .crumb, .search kbd{ display:none; }
+    .chrome{ gap:10px; padding:10px 12px; }
+    .dockwrap{ padding:8px 12px 10px; }
+    .dock{ grid-template-columns:minmax(0,1fr) auto; }
+    .dright{ grid-column:1 / -1; justify-content:center; }
+    .dleft span{ display:none; }
+    .dleft b{ max-width:140px; }
+    .strip{ grid-template-columns:repeat(auto-fill,minmax(min(140px,100%),1fr)); gap:10px; }
+    .thead,.trow{ padding-left:6px; padding-right:6px; gap:8px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="chrome">
+  <div class="dots"><i></i><i></i><i></i></div>
+  <div class="crumb"><b>Flow</b> &nbsp;/&nbsp; Collection</div>
+  <div class="search" id="searchBox"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="q" placeholder="Search your collection…" /><kbd>⌘K</kbd></div>
+  <div class="avatar">B</div>
+</header>
+
+<div class="app">
+  <aside class="rail">
+    <div class="sec">LIBRARY</div>
+    <button class="ri on">◈&nbsp; Overview</button>
+    <button class="ri">◎&nbsp; Albums</button>
+    <button class="ri">♫&nbsp; Tracks<span class="n">1,248</span></button>
+    <button class="ri" id="likedNav">♥&nbsp; Liked<span class="n" id="likedN">1</span></button>
+    <div class="sec">MIXES <button>+ NEW</button></div>
+    <div id="pls"></div>
+    <div class="meter"><b>Local library</b><br/>86.4 GB of 134 GB · SSD<div class="bar"><i id="meterBar"></i></div></div>
+  </aside>
+
+  <main class="center">
+    <div class="listhead"><b>Collection</b><span id="statLine">8 records · 1,248 tracks</span></div>
+    <div class="toolbar">
+      <button class="chip on" data-f="All">All</button>
+      <button class="chip" data-f="FLAC">FLAC</button>
+      <button class="chip" data-f="MP3">MP3</button>
+      <button class="chip" data-f="WAV">WAV</button>
+      <button class="chip" data-f="Liked">♥ Liked</button>
+      <select id="sort"><option value="def">Recently added</option><option value="title">Title A–Z</option><option value="artist">Artist A–Z</option><option value="dur">Longest first</option></select>
+    </div>
+    <div class="strip" id="shelf"></div>
+    <div class="thead"><span>#</span><span>TITLE</span><span>ALBUM</span><span>TIME</span><span>SIGNAL</span><span></span></div>
+    <div id="rows"></div>
+  </main>
+
+  <aside class="np">
+    <div class="tabs">
+      <button class="tab on" data-t="now">NOW</button>
+      <button class="tab" data-t="queue">QUEUE</button>
+      <button class="tab" data-t="lyrics">LYRICS</button>
+    </div>
+    <div class="npbody" id="tab-now">
+      <div class="big a1" id="bigArt"></div>
+      <div><h2 id="npT">Midnight Drive</h2><div class="by" id="npA">Neon Coastline — Midnight Circuits</div></div>
+      <div class="specs" id="specs"></div>
+      <div><div class="wavelabel"><span>● CLICK TO SEEK</span><span id="wTime">1:12 / 3:47</span></div>
+      <canvas id="wave" width="290" height="76" style="margin-top:6px"></canvas></div>
+      <div class="wavelabel"><span>UP NEXT</span><span>DRAG TO REORDER</span></div>
+      <div id="queueMini" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
+    <div class="npbody" id="tab-queue" style="display:none"></div>
+    <div class="npbody" id="tab-lyrics" style="display:none"><div class="lyr" id="lyrics"></div></div>
+  </aside>
+</div>
+
+<footer class="dockwrap">
+  <div id="seek"><div id="seekTrack"><div id="seekFill"></div></div></div>
+  <div class="dock">
+    <div class="dleft">
+      <div class="mini a1" id="dArt"></div>
+      <div><b id="dT">Midnight Drive</b><span id="dA">Neon Coastline</span></div>
+      <button class="heart" id="like">♡</button>
+    </div>
+    <div class="dctl">
+      <button class="ibtn" id="sh" title="Shuffle">⇄</button>
+      <button class="ibtn" id="prev" title="Previous"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 20L9 12l10-8v16zM7 4H5v16h2z"/></svg></button>
+      <button class="play" id="playBtn"><svg id="playIco" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4h4v16H7zM13 4h4v16h-4z"/></svg></button>
+      <button class="ibtn" id="next"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M5 4l10 8-10 8V4zM17 4h2v16h-2z"/></svg></button>
+      <button class="ibtn" id="rp" title="Repeat">↻</button>
+      <button class="ibtn" id="dockQ" title="Queue panel">QUEUE</button>
+      <button class="ibtn" id="dockL" title="Lyrics panel">LYR</button>
+    </div>
+    <div class="dright"><span id="tc">1:12 / 3:47</span><div id="vol"><div id="volTrack"><div id="volFill"></div></div></div></div>
+  </div>
+</footer>
+
+<div id="palWrap"><div id="pal"><input id="palInput" placeholder="Jump to a track, album, or command…" /><div id="palList"></div></div></div>
+
+<script>
+const T = [
+  {t:"Midnight Drive", a:"Neon Coastline", al:"Midnight Circuits", d:"3:47", s:227, f:"FLAC", khz:"44.1kHz/16-bit", br:"912 kbps", art:"a1", hi:true},
+  {t:"Glass Horizon", a:"Aerials", al:"Weightless", d:"4:02", s:242, f:"FLAC", khz:"96kHz/24-bit", br:"2,304 kbps", art:"a2", hi:true},
+  {t:"Paper Suns", a:"Kasbo Lane", al:"Daydream", d:"3:15", s:195, f:"MP3", khz:"44.1kHz", br:"320 kbps", art:"a3", hi:false},
+  {t:"Velvet Static", a:"Mono Youth", al:"Noise Bloom", d:"2:58", s:178, f:"MP3", khz:"44.1kHz", br:"256 kbps", art:"a4", hi:false},
+  {t:"Low Orbit", a:"Satelite", al:"Gravity", d:"5:11", s:311, f:"FLAC", khz:"48kHz/24-bit", br:"1,890 kbps", art:"a5", hi:true},
+  {t:"Copper Sky", a:"Desert FM", al:"Mirage", d:"3:33", s:213, f:"WAV", khz:"44.1kHz/16-bit", br:"1,411 kbps", art:"a6", hi:false},
+  {t:"Night Bus", a:"Neon Coastline", al:"Midnight Circuits", d:"4:20", s:260, f:"FLAC", khz:"44.1kHz/16-bit", br:"880 kbps", art:"a7", hi:false},
+  {t:"Fernweh", a:"Aerials", al:"Weightless", d:"3:05", s:185, f:"WAV", khz:"48kHz/24-bit", br:"2,304 kbps", art:"a8", hi:true},
+];
+const LYR = ["Headlights on the empty road,","city glows in indigo,","every signal that we know","fades into the radio.","We drive, we drive —","midnight, midnight,","hold the frequency,","stay with me."];
+let queue = [0,1,4,6,2]; // track indices, grouped demo: first two same album? keep simple grouping by album below
+let qi = 0, playing = true, pos = 72, filter = "All", sort = "def", liked = new Set([2]);
+let peaks = T.map(k => Array.from({length:96}, () => 0.25 + Math.random()*0.75));
+const $ = id => document.getElementById(id);
+const fmt = s => { s=Math.max(0,Math.floor(s)); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); };
+const cur = () => T[queue[qi]];
+
+// playlists
+[["Late Night Drive",34,"var(--acc)"],["Deep Focus",52,"#3a3a42"],["Gym Energy",41,"#3a3a42"],["Chill Sunday",28,"#3a3a42"]].forEach(([n,k,c],i)=>{
+  const b=document.createElement("button"); b.className="ri"+(i===0?" on":"");
+  b.innerHTML=`<span class="sw" style="background:${c}"></span>${n}<span class="n">${k}</span>`;
+  b.onclick=()=>{ document.querySelectorAll("#pls .ri").forEach(x=>x.classList.remove("on")); b.classList.add("on"); };
+  const w=document.createElement("div"); w.id="pls"; w.appendChild(b);
+  document.querySelector(".rail").insertBefore(w, document.querySelector(".meter"));
+});
+// shelf
+function renderShelf(){
+  const sh=$("shelf"); sh.innerHTML="";
+  [...new Map(T.map(k=>[k.al,k])).values()].slice(0,6).forEach(k=>{
+    const d=document.createElement("div"); d.className="album";
+    d.innerHTML=`<div class="cov ${k.art}"><div class="badge"><em>${k.f}</em>${k.hi?'<em class="hi">HI-RES</em>':''}</div></div><b>${k.al}</b><span>${k.a} · ${k.khz}</span>`;
+    d.onclick=()=>{ const i=T.indexOf(k); queue=[i]; qi=0; pos=0; playing=true; sync(); };
+    sh.appendChild(d);
+  });
+}
+// rows
+function filtered(){
+  let list=T.map((t,i)=>({...t,i}));
+  if(filter==="Liked") list=list.filter(t=>liked.has(t.i));
+  else if(filter!=="All") list=list.filter(t=>t.f===filter);
+  const q=$("q").value.toLowerCase();
+  if(q) list=list.filter(t=>(t.t+t.a+t.al).toLowerCase().includes(q));
+  if(sort==="title") list.sort((a,b)=>a.t.localeCompare(b.t));
+  if(sort==="artist") list.sort((a,b)=>a.a.localeCompare(b.a));
+  if(sort==="dur") list.sort((a,b)=>b.s-a.s);
+  return list;
+}
+function waveMini(seed, frac){
+  let h=""; const p=peaks[seed%peaks.length];
+  p.forEach((v,i)=>{ const hh=Math.round(v*20)+2; h+=`<i class="${(i/p.length)<frac?'played':''}" style="height:${hh}px"></i>`; });
+  return h;
+}
+function renderRows(){
+  const rows=$("rows"); const list=filtered(); rows.innerHTML="";
+  if(!list.length){ rows.innerHTML=`<div class="empty">No tracks match. <u style="cursor:pointer" onclick="document.getElementById('q').value='';renderRows()">Clear search</u></div>`; return; }
+  list.forEach((k,n)=>{
+    const isCur = k.i===cur().i;
+    const r=document.createElement("div"); r.className="trow"+(isCur?" play":"");
+    r.innerHTML=`<span class="idx">${isCur?(playing?"‖":"▶"):String(n+1).padStart(2,"0")}</span>
+      <div class="tt"><b>${k.t}</b><span>${k.a}</span></div>
+      <div class="tal">${k.al}</div><div class="dur">${k.d}</div>
+      <div class="mini-wave">${waveMini(k.i, isCur?pos/k.s:0)}</div>
+      <button class="heart ${liked.has(k.i)?"liked":""}">${liked.has(k.i)?"♥":"♡"}</button>
+      <div class="rowacts"><button data-a="next">NEXT UP</button><button data-a="end">+ QUEUE</button></div>`;
+    r.onclick=e=>{
+      if(e.target.classList.contains("heart")){ liked.has(k.i)?liked.delete(k.i):liked.add(k.i); $("likedN").textContent=liked.size; sync(); return; }
+      const a=e.target.dataset.a;
+      if(a==="next"){ queue.splice(qi+1,0,k.i); sync(); return; }
+      if(a==="end"){ queue.push(k.i); sync(); return; }
+      queue=[k.i]; qi=0; pos=0; playing=true; sync();
+    };
+    rows.appendChild(r);
+  });
+  $("statLine").textContent=`${list.length} shown · 1,248 tracks`;
+}
+// queue grouped by album (Recordbox-style)
+function renderQueue(){
+  const qtab=$("tab-queue"); qtab.innerHTML="";
+  const groups={}; queue.forEach((ti,pos)=>{ const k=T[ti]; (groups[k.al]=groups[k.al]||[]).push({k,ti,pos}); });
+  Object.entries(groups).forEach(([al,items])=>{
+    const g=document.createElement("div"); g.className="qgroup"; g.style.marginBottom="10px";
+    g.innerHTML=`<h5>▤ <b>${al}</b> — ${items[0].k.a} <span>${items.length} TRK · ⇄ DRAG</span></h5>`;
+    items.forEach(({k,ti,pos})=>{
+      const d=document.createElement("div"); d.className="qi"+(pos===qi?" cur":""); d.draggable=true;
+      d.innerHTML=`<span class="grip">⋮⋮</span><div class="mini ${k.art}"></div><div><b>${k.t}</b><span>${k.f} · ${k.d}</span></div><span class="qd">${pos===qi?"▶":fmt(k.s)}</span>`;
+      d.onclick=()=>{ qi=pos; pos=0; pos=0; playing=true; qi=pos; qi=d?pos:pos; qi=pos; syncQueueJump(pos); };
+      d.ondragstart=e=>{ e.dataTransfer.setData("text/plain",pos); d.classList.add("drag"); };
+      d.ondragend=()=>d.classList.remove("drag");
+      d.ondragover=e=>e.preventDefault();
+      d.ondrop=e=>{ e.preventDefault(); const from=+e.dataTransfer.getData("text/plain"); const [m]=queue.splice(from,1); queue.splice(pos,0,m); if(qi===from)qi=pos; else if(from<qi&&pos>=qi)qi--; else if(from>qi&&pos<=qi)qi++; sync(); };
+      g.appendChild(d);
+    });
+    qtab.appendChild(g);
+  });
+  // mini mirror in NOW tab
+  const qm=$("queueMini"); qm.innerHTML="";
+  queue.slice(qi+1,qi+4).forEach((ti,p)=>{
+    const k=T[ti]; const d=document.createElement("div"); d.className="qi"; d.style.border="1px solid var(--line)"; d.style.borderRadius="9px";
+    d.innerHTML=`<div class="mini ${k.art}"></div><div><b>${k.t}</b><span>${k.a}</span></div><span class="qd">${k.d}</span>`;
+    d.onclick=()=>syncQueueJump(qi+1+p); qm.appendChild(d);
+  });
+  if(!qm.children.length) qm.innerHTML=`<div style="font-size:12px;color:var(--dim)">End of the line — hover any track to queue it.</div>`;
+}
+function syncQueueJump(p){ qi=p; pos=0; playing=true; sync(); }
+function renderLyrics(){
+  const L=$("lyrics"); L.innerHTML="";
+  const step=Math.floor(pos/24);
+  LYR.forEach((line,i)=>{
+    const p=document.createElement("p"); p.textContent=line;
+    if(i===step%LYR.length)p.className="cur"; else if(i<step%LYR.length)p.className="past";
+    L.appendChild(p);
+  });
+}
+// tabs — dock buttons jump here (connected, per Dagley critique)
+function showTab(t){
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("on",b.dataset.t===t));
+  ["now","queue","lyrics"].forEach(k=>$("tab-"+k).style.display=k===t?"flex":"none");
+}
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>showTab(b.dataset.t));
+function drawer(t){
+  const small = window.matchMedia("(max-width: 1080px)").matches;
+  const active = document.querySelector(".tab.on").dataset.t;
+  if(small && document.body.classList.contains("np-open") && active===t){ document.body.classList.remove("np-open"); return; }
+  showTab(t);
+  if(small) document.body.classList.add("np-open");
+}
+$("dockQ").onclick=()=>drawer("queue"); $("dockL").onclick=()=>drawer("lyrics");
+document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{ document.querySelectorAll(".chip").forEach(x=>x.classList.remove("on")); c.classList.add("on"); filter=c.dataset.f; renderRows(); });
+$("sort").onchange=e=>{ sort=e.target.value; renderRows(); };
+$("likedNav").onclick=()=>{ filter="Liked"; document.querySelectorAll(".chip").forEach(x=>x.classList.toggle("on",x.dataset.f==="Liked")); renderRows(); };
+// transport
+function play(i){ queue=[i]; qi=0; pos=0; playing=true; sync(); }
+function toggle(){ playing=!playing; sync(); }
+function step(d){ qi=(qi+d+queue.length)%queue.length; pos=0; playing=true; sync(); }
+$("playBtn").onclick=toggle; $("next").onclick=()=>step(1); $("prev").onclick=()=>step(-1);
+$("sh").onclick=e=>e.currentTarget.classList.toggle("on"); $("rp").onclick=e=>e.currentTarget.classList.toggle("on");
+$("like").onclick=()=>{ const c=cur().i; liked.has(c)?liked.delete(c):liked.add(c); $("likedN").textContent=liked.size; sync(); };
+$("seek").onclick=e=>{ const r=$("seekTrack").getBoundingClientRect(); pos=cur().s*((e.clientX-r.left)/r.width); sync(); };
+$("wave").onclick=e=>{ const r=e.currentTarget.getBoundingClientRect(); pos=cur().s*((e.clientX-r.left)/r.width); sync(); };
+$("vol").onclick=e=>{ const r=$("volTrack").getBoundingClientRect(); $("volFill").style.width=((e.clientX-r.left)/r.width*100)+"%"; };
+$("q").addEventListener("input",renderRows);
+$("searchBox").onclick=e=>{ if(e.target.tagName!=="INPUT")$("q").focus(); };
+function sync(){
+  const k=cur();
+  $("dT").textContent=k.t; $("dA").textContent=k.a; $("npT").textContent=k.t; $("npA").textContent=`${k.a} — ${k.al}`;
+  $("bigArt").className="big "+k.art; $("dArt").className="mini "+k.art;
+  $("specs").innerHTML=`<em class="${k.hi?'hi':''}">${k.f} ${k.hi?'HI-RES':'LOSSY'.replace('LOSSY',k.f==='FLAC'?'LOSSLESS':'LOSSY')}</em><em>${k.khz}</em><em>${k.br}</em><em>~/Music/${k.a}/${k.al}/</em>`;
+  $("playIco").innerHTML=playing?'<path d="M7 4h4v16H7zM13 4h4v16h-4z"/>':'<path d="M8 5v14l11-7z"/>';
+  const id=T.indexOf(k); $("like").textContent=liked.has(id)?"♥":"♡"; $("like").classList.toggle("liked",liked.has(id));
+  $("tc").textContent=`${fmt(pos)} / ${k.d}`; $("wTime").textContent=`${fmt(pos)} / ${k.d}`;
+  $("seekFill").style.width=(pos/k.s*100)+"%";
+  renderRows(); renderQueue(); renderLyrics(); drawWave();
+}
+document.addEventListener("keydown",e=>{
+  const typing=document.activeElement.tagName==="INPUT";
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){ e.preventDefault(); openPal(); }
+  if(e.key==="Escape"){ closePal(); document.body.classList.remove("np-open"); }
+  if(typing)return;
+  if(e.code==="Space"){ e.preventDefault(); toggle(); }
+  if(e.key==="ArrowRight")step(1); if(e.key==="ArrowLeft")step(-1);
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="f"){ e.preventDefault(); $("q").focus(); }
+});
+setInterval(()=>{ if(!playing)return; pos+=1; if(pos>=cur().s){ step(1); return; }
+  $("tc").textContent=`${fmt(pos)} / ${cur().d}`; $("wTime").textContent=`${fmt(pos)} / ${cur().d}`;
+  $("seekFill").style.width=(pos/cur().s*100)+"%"; renderLyrics(); drawWave();
+},1000);
+// waveform seek (Amberol-style)
+const cv=$("wave"), ctx=cv.getContext("2d");
+function drawWave(){
+  const k=cur(); ctx.clearRect(0,0,cv.width,cv.height);
+  const p=peaks[T.indexOf(k)], bw=cv.width/p.length;
+  p.forEach((v,i)=>{ const h=v*(cv.height-14); const played=(i/p.length)<pos/k.s;
+    ctx.fillStyle=played?"#d9ff3d":"rgba(244,241,234,.22)";
+    ctx.fillRect(i*bw+1,(cv.height-h)/2,Math.max(1,bw-2),h); });
+  const px=(pos/k.s)*cv.width; ctx.fillStyle="#d9ff3d"; ctx.fillRect(px-1,0,2,cv.height);
+}
+// command palette (Feishin-style)
+let palSel=0, palItems=[];
+function openPal(){ $("palWrap").classList.add("open"); $("palInput").value=""; $("palInput").focus(); renderPal(""); }
+function closePal(){ $("palWrap").classList.remove("open"); }
+$("palWrap").onclick=e=>{ if(e.target.id==="palWrap")closePal(); };
+$("palInput").addEventListener("input",e=>renderPal(e.target.value));
+$("palInput").addEventListener("keydown",e=>{
+  if(e.key==="ArrowDown"){ e.preventDefault(); palSel=Math.min(palSel+1,palItems.length-1); paintPal(); }
+  if(e.key==="ArrowUp"){ e.preventDefault(); palSel=Math.max(palSel-1,0); paintPal(); }
+  if(e.key==="Enter"&&palItems[palSel])palItems[palSel].run();
+});
+function renderPal(q){
+  q=q.toLowerCase(); palItems=[]; palSel=0;
+  const cmds=[{n:"Play / pause",k:"space",run:()=>{closePal();toggle();}},{n:"Skip to next",k:"→",run:()=>{closePal();step(1);}},{n:"Show queue",k:"",run:()=>{closePal();drawer("queue");}},{n:"Show lyrics",k:"",run:()=>{closePal();drawer("lyrics");}}];
+  let h=`<div class="psec">COMMANDS</div>`;
+  cmds.filter(c=>c.n.toLowerCase().includes(q)).forEach(c=>{ const it={...c}; palItems.push({run:c.run}); h+=`<div class="pi" data-i="${palItems.length-1}">◈ ${c.n}<span class="k">${c.k}</span></div>`; });
+  h+=`<div class="psec">TRACKS</div>`;
+  T.map((t,i)=>({...t,i})).filter(t=>(t.t+t.a+t.al).toLowerCase().includes(q)).slice(0,6).forEach(t=>{
+    palItems.push({run:()=>{closePal();play(t.i);}});
+    h+=`<div class="pi" data-i="${palItems.length-1}"><div class="mini ${t.art}"></div><div><b>${t.t}</b> <span style="color:var(--mut)">${t.a} · ${t.f}</span></div><span class="k">↵ play</span></div>`;
+  });
+  $("palList").innerHTML=h; paintPal();
+  document.querySelectorAll(".pi").forEach(el=>el.onclick=()=>palItems[+el.dataset.i].run());
+}
+function paintPal(){ document.querySelectorAll(".pi").forEach((el,i)=>el.classList.toggle("sel",i===palSel)); }
+renderShelf(); sync(); showTab("now");
+</script>
+</body>
+</html>

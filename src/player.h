@@ -1,0 +1,126 @@
+#pragma once
+
+#include "lyrics.h"
+#include "playqueue.h"
+
+#include <QAudioOutput>
+#include <QMediaPlayer>
+#include <QObject>
+#include <QVariantList>
+#include <QVariantMap>
+#include <QtQml/qqmlregistration.h>
+
+class Library;
+class QJSEngine;
+class QQmlEngine;
+
+// Playback engine: QMediaPlayer (ffmpeg backend) driven by a PlayQueue.
+// Times are exposed to QML in seconds.
+class Player : public QObject
+{
+    Q_OBJECT
+    QML_ELEMENT
+    QML_SINGLETON
+
+    Q_PROPERTY(QAbstractItemModel *queue READ queueModel CONSTANT)
+    Q_PROPERTY(int queueIndex READ queueIndex NOTIFY queueChanged)
+    Q_PROPERTY(int queueCount READ queueCount NOTIFY queueChanged)
+    Q_PROPERTY(bool hasTrack READ hasTrack NOTIFY currentChanged)
+    Q_PROPERTY(QVariantMap current READ current NOTIFY currentChanged)
+    Q_PROPERTY(qint64 currentId READ currentId NOTIFY currentChanged)
+    Q_PROPERTY(bool playing READ playing NOTIFY playingChanged)
+    Q_PROPERTY(qreal position READ position NOTIFY positionChanged)
+    Q_PROPERTY(qreal duration READ duration NOTIFY durationChanged)
+    Q_PROPERTY(qreal volume READ volume WRITE setVolume NOTIFY volumeChanged)
+    Q_PROPERTY(bool shuffle READ shuffle WRITE setShuffle NOTIFY shuffleChanged)
+    Q_PROPERTY(bool repeat READ repeat WRITE setRepeat NOTIFY repeatChanged)
+    Q_PROPERTY(QVariantList lyrics READ lyrics NOTIFY lyricsChanged)
+    Q_PROPERTY(bool lyricsTimed READ lyricsTimed NOTIFY lyricsChanged)
+    Q_PROPERTY(int lyricIndex READ lyricIndex NOTIFY lyricIndexChanged)
+    Q_PROPERTY(QString error READ error NOTIFY errorChanged)
+
+public:
+    explicit Player(Library *library, QObject *parent = nullptr);
+    ~Player() override;
+
+    static Player *create(QQmlEngine *qmlEngine, QJSEngine *jsEngine);
+    static void setInstance(Player *player) { s_instance = player; }
+
+    QAbstractItemModel *queueModel() { return &m_queue; }
+    PlayQueue *queue() { return &m_queue; }
+    int queueIndex() const { return m_queue.currentIndex(); }
+    int queueCount() const { return m_queue.count(); }
+    bool hasTrack() const { return m_queue.current() != nullptr; }
+    QVariantMap current() const { return m_currentMap; }
+    qint64 currentId() const;
+    bool playing() const;
+    qreal position() const { return m_player.position() / 1000.0; }
+    qreal duration() const;
+    qreal volume() const { return m_volume; }
+    void setVolume(qreal volume);
+    bool shuffle() const { return m_queue.isShuffled(); }
+    void setShuffle(bool on);
+    bool repeat() const { return m_repeat; }
+    void setRepeat(bool on);
+    QVariantList lyrics() const { return m_lyricsList; }
+    bool lyricsTimed() const { return m_lyrics.timed; }
+    int lyricIndex() const { return m_lyricIndex; }
+    QString error() const { return m_error; }
+
+    // Replace the queue with `ids` (library track ids) and start at `start`.
+    Q_INVOKABLE void playTracks(const QVariantList &ids, int start);
+    Q_INVOKABLE void toggle();
+    Q_INVOKABLE void play();
+    Q_INVOKABLE void pause();
+    Q_INVOKABLE void next();
+    Q_INVOKABLE void previous();
+    Q_INVOKABLE void seek(qreal seconds);
+    Q_INVOKABLE void jump(int queueRow);
+    Q_INVOKABLE void playNext(qint64 id);
+    Q_INVOKABLE void enqueue(qint64 id);
+    Q_INVOKABLE void removeAt(int queueRow);
+    Q_INVOKABLE void move(int from, int to);
+    Q_INVOKABLE void clearQueue();
+    Q_INVOKABLE QVariantMap queueAt(int queueRow) const;   // track roles of a queue row
+
+signals:
+    void queueChanged();
+    void currentChanged();
+    void playingChanged();
+    void positionChanged();
+    void durationChanged();
+    void volumeChanged();
+    void shuffleChanged();
+    void repeatChanged();
+    void lyricsChanged();
+    void lyricIndexChanged();
+    void errorChanged();
+
+private:
+    void loadCurrent(bool autoplay);
+    void refreshCurrentMap();
+    void updateLyricIndex();
+    void onMediaStatus(QMediaPlayer::MediaStatus status);
+    void onError(QMediaPlayer::Error error, const QString &text);
+    void onTrackUpdated(qint64 id);
+    void onLibraryReloaded();
+    void saveSettings() const;
+    void setError(const QString &error);
+
+    static inline Player *s_instance = nullptr;
+
+    Library *m_library;
+    PlayQueue m_queue;
+    QAudioOutput m_audio;        // declared first: must outlive m_player
+    QMediaPlayer m_player;
+    QString m_loadedPath;
+    quint64 m_loadedUid = 0;     // queue entry currently in m_player
+    QVariantMap m_currentMap;
+    qreal m_volume = 0.7;
+    bool m_repeat = false;
+    int m_errorStreak = 0;       // consecutive unplayable tracks, stops skip loops
+    Lyrics m_lyrics;
+    QVariantList m_lyricsList;
+    int m_lyricIndex = -1;
+    QString m_error;
+};
