@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 
 option(FLOW_BUILD_TESTS "Build the QtTest suite" ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick Multimedia Sql)
+find_package(Qt6 REQUIRED COMPONENTS Quick Multimedia Sql DBus)
 find_package(taglib 2 REQUIRED CONFIG)
 
 qt_standard_project_setup()
@@ -26,6 +26,7 @@ target_link_libraries(flowcore PUBLIC Qt6::Core Qt6::Sql TagLib::tag)
 
 qt_add_executable(flow
     src/main.cpp
+    src/mpris.h src/mpris.cpp
 )
 
 # QML module: URI Flow, entry point Main (qml/Main.qml).
@@ -40,7 +41,7 @@ qt_add_qml_module(flow
         src/player.h src/player.cpp
 )
 
-target_link_libraries(flow PRIVATE flowcore Qt6::Quick Qt6::Multimedia)
+target_link_libraries(flow PRIVATE flowcore Qt6::Quick Qt6::Multimedia Qt6::DBus)
 
 install(TARGETS flow RUNTIME DESTINATION bin)
 
@@ -59,4 +60,14 @@ if(FLOW_BUILD_TESTS)
     target_link_libraries(tst_player PRIVATE flowcore Qt6::Multimedia Qt6::Qml Qt6::Test)
     add_test(NAME tst_player COMMAND tst_player)
     set_tests_properties(tst_player PROPERTIES TIMEOUT 90)
+
+    # MPRIS on a private session bus so the test never touches the desktop's.
+    find_program(DBUS_RUN_SESSION dbus-run-session)
+    qt_add_executable(tst_mpris tests/tst_mpris.cpp
+        src/library.h src/library.cpp src/player.h src/player.cpp src/mpris.h src/mpris.cpp)
+    target_link_libraries(tst_mpris PRIVATE flowcore Qt6::Multimedia Qt6::Qml Qt6::DBus Qt6::Test)
+    if(DBUS_RUN_SESSION)
+        add_test(NAME tst_mpris COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_mpris>)
+        set_tests_properties(tst_mpris PROPERTIES TIMEOUT 90)
+    endif()
 endif()

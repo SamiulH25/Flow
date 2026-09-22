@@ -111,6 +111,7 @@ public:
 
     const QList<Track> &tracks() const { return m_tracks; }
     const Track *trackById(qint64 id) const;
+    const Track *trackByPath(const QString &path) const;
 
     Q_INVOKABLE void rescan();
     Q_INVOKABLE void toggleLike(qint64 id);

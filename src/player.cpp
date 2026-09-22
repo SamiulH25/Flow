@@ -72,6 +72,11 @@ bool Player::playing() const
     return m_player.playbackState() == QMediaPlayer::PlayingState;
 }
 
+bool Player::paused() const
+{
+    return m_player.playbackState() == QMediaPlayer::PausedState;
+}
+
 qreal Player::duration() const
 {
     if (m_player.duration() > 0)
@@ -300,6 +305,11 @@ void Player::pause()
     m_player.pause();
 }
 
+void Player::stop()
+{
+    m_player.stop();
+}
+
 void Player::next()
 {
     const int next = m_queue.nextIndex(m_repeat);
@@ -329,6 +339,7 @@ void Player::seek(qreal seconds)
     const qreal len = duration();
     seconds = qBound(0.0, seconds, len > 0 ? len : seconds);
     m_player.setPosition(qint64(seconds * 1000));
+    emit seeked(seconds);
 }
 
 void Player::jump(int queueRow)

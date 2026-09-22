@@ -52,8 +52,10 @@ public:
     int queueCount() const { return m_queue.count(); }
     bool hasTrack() const { return m_queue.current() != nullptr; }
     QVariantMap current() const { return m_currentMap; }
+    const Track *currentTrack() const { return m_queue.current(); }
     qint64 currentId() const;
     bool playing() const;
+    bool paused() const;
     qreal position() const { return m_player.position() / 1000.0; }
     qreal duration() const;
     qreal volume() const { return m_volume; }
@@ -72,6 +74,7 @@ public:
     Q_INVOKABLE void toggle();
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();
+    Q_INVOKABLE void stop();
     Q_INVOKABLE void next();
     Q_INVOKABLE void previous();
     Q_INVOKABLE void seek(qreal seconds);
@@ -95,6 +98,7 @@ signals:
     void lyricsChanged();
     void lyricIndexChanged();
     void errorChanged();
+    void seeked(qreal seconds);   // explicit jumps only, not normal progress
 
 private:
     void loadCurrent(bool autoplay);

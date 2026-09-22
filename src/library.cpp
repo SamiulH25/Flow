@@ -148,6 +148,15 @@ const Track *Library::trackById(qint64 id) const
     return it == m_indexById.cend() ? nullptr : &m_tracks.at(*it);
 }
 
+const Track *Library::trackByPath(const QString &path) const
+{
+    for (const Track &t : m_tracks) {
+        if (t.path == path)
+            return &t;
+    }
+    return nullptr;
+}
+
 void Library::setError(const QString &error)
 {
     if (m_error == error)

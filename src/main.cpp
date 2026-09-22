@@ -1,4 +1,5 @@
 #include "library.h"
+#include "mpris.h"
 #include "player.h"
 
 #include <QDir>
@@ -52,6 +53,16 @@ int main(int argc, char *argv[])
     engine.loadFromModule(QStringLiteral("Flow"), QStringLiteral("Main"));
     if (engine.rootObjects().isEmpty())
         return 1;
+
+    Mpris mpris(&player, &library);
+    mpris.registerOnBus();
+    if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first())) {
+        QObject::connect(&mpris, &Mpris::raiseRequested, window, [window] {
+            window->show();
+            window->raise();
+            window->requestActivate();
+        });
+    }
 
     // Dev-only: --screenshot=path grabs the window after layout settles, then quits.
     // Works headless (offscreen platform) for visual checks without a display server.
