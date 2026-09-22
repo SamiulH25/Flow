@@ -2,8 +2,10 @@
 #include "mpris.h"
 #include "player.h"
 
+#include <QCommandLineParser>
 #include <QDir>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QSettings>
 #include <QStandardPaths>
@@ -17,15 +19,35 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("Flow"));
     app.setOrganizationName(QStringLiteral("Flow"));
+    app.setApplicationVersion(QStringLiteral(FLOW_VERSION));
+    // Wayland app_id / X11 class: matches flow.desktop and MPRIS DesktopEntry.
+    app.setDesktopFileName(QStringLiteral("flow"));
+    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("flow"), QIcon(QStringLiteral(":/data/flow.svg"))));
 
-    // Music folder: --library=PATH (remembered), else the last one, else ~/Music.
+    QCommandLineParser cli;
+    cli.setApplicationDescription(QStringLiteral("Flow — a local music player for FLAC, MP3 and WAV."));
+    cli.addHelpOption();
+    cli.addVersionOption();
+    const QCommandLineOption libraryOption(
+        QStringLiteral("library"),
+        QStringLiteral("Music folder to index and play (remembered for next time)."),
+        QStringLiteral("path"));
+    cli.addOption(libraryOption);
+    // Dev-only: grab the window after layout settles, then quit. Works headless
+    // (QT_QPA_PLATFORM=offscreen) for visual checks without a display server.
+    QCommandLineOption screenshotOption(QStringLiteral("screenshot"),
+                                       QStringLiteral("Save a screenshot and quit."),
+                                       QStringLiteral("file"));
+    screenshotOption.setFlags(QCommandLineOption::HiddenFromHelp);
+    cli.addOption(screenshotOption);
+    cli.process(app);   // exits on --help, --version or unknown options
+
+    // Music folder: --library (remembered), else the last one, else ~/Music.
     QSettings settings;
     QString musicDir = settings.value(QStringLiteral("library/dir")).toString();
-    for (const QString &arg : app.arguments()) {
-        if (arg.startsWith(QStringLiteral("--library="))) {
-            musicDir = QDir(arg.mid(QStringLiteral("--library=").size())).absolutePath();
-            settings.setValue(QStringLiteral("library/dir"), musicDir);
-        }
+    if (cli.isSet(libraryOption)) {
+        musicDir = QDir(cli.value(libraryOption)).absolutePath();
+        settings.setValue(QStringLiteral("library/dir"), musicDir);
     }
     if (musicDir.isEmpty())
         musicDir = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
@@ -64,13 +86,7 @@ int main(int argc, char *argv[])
         });
     }
 
-    // Dev-only: --screenshot=path grabs the window after layout settles, then quits.
-    // Works headless (offscreen platform) for visual checks without a display server.
-    QString shotPath;
-    for (const QString &arg : app.arguments()) {
-        if (arg.startsWith(QStringLiteral("--screenshot=")))
-            shotPath = arg.mid(QStringLiteral("--screenshot=").size());
-    }
+    const QString shotPath = cli.value(screenshotOption);
     if (!shotPath.isEmpty()) {
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         if (!window) {

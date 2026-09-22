@@ -6,12 +6,17 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 option(FLOW_BUILD_TESTS "Build the QtTest suite" ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Quick Multimedia Sql DBus)
 find_package(taglib 2 REQUIRED CONFIG)
 
-qt_standard_project_setup()
+include(GNUInstallDirs)
+qt_standard_project_setup(REQUIRES 6.8)
 
 # Core: library index, scanner, lyrics, play queue. No QML, so tests link it directly.
 qt_add_library(flowcore STATIC
@@ -43,9 +48,15 @@ qt_add_qml_module(flow
         src/waveform.h src/waveform.cpp
 )
 
+# Window icon, embedded so it also works uninstalled.
+qt_add_resources(flow "icon" PREFIX "/" FILES data/flow.svg)
+
+target_compile_definitions(flow PRIVATE FLOW_VERSION="${PROJECT_VERSION}")
 target_link_libraries(flow PRIVATE flowcore Qt6::Quick Qt6::Multimedia Qt6::DBus)
 
-install(TARGETS flow RUNTIME DESTINATION bin)
+install(TARGETS flow RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES data/flow.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES data/flow.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 
 if(FLOW_BUILD_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)

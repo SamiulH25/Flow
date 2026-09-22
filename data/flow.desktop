@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Flow
+GenericName=Music Player
+Comment=Play your local FLAC, MP3 and WAV library
+Exec=flow
+Icon=flow
+Terminal=false
+Categories=AudioVideo;Audio;Player;Qt;
+Keywords=music;audio;player;flac;mp3;playlist;
+StartupWMClass=flow

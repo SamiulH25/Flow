@@ -1,0 +1,41 @@
+# Local Arch package for Flow, built from this checkout's committed HEAD.
+#   cd packaging/arch && makepkg -si
+pkgname=flow-player
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Stylish local music player for FLAC, MP3 and WAV (Qt 6 / QML)"
+arch=('x86_64')
+url="https://github.com/"
+license=('custom:unknown')
+depends=('qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-multimedia-ffmpeg' 'qt6-svg' 'taglib')
+optdepends=('qt6-wayland: native Wayland windows'
+            'playerctl: control playback from the terminal or keybinds (MPRIS)')
+makedepends=('cmake' 'ninja' 'git')
+provides=('flow')
+source=("flow::git+file://$(cd "$startdir/../.." && pwd)")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd flow
+    # 0.1.0.r<commits>.g<hash>
+    printf '%s.r%s.g%s' "$(sed -n 's/^project(Flow VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)" \
+        "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+    cmake -S flow -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_SKIP_INSTALL_RPATH=ON
+    cmake --build build
+}
+
+check() {
+    # Playback and MPRIS tests need an audio server and a session bus, which
+    # clean chroots lack; the rest run everywhere.
+    ctest --test-dir build --output-on-failure -E 'tst_player|tst_mpris'
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+}

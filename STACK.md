@@ -56,36 +56,43 @@ Qt 6.11.2 (`base`, `declarative`, `multimedia` + `ffmpeg` backend, `wayland`, `s
 Flow/
   CMakeLists.txt
   src/            # flowcore (static lib, no QML): track, librarydb (SQLite, schema v3),
-                  #   libraryscanner (TagLib), lyrics (.lrc / embedded), playqueue
-                  # QML singletons: library (views, mixes, watcher, scan thread),
+                  #   libraryscanner (TagLib), lyrics (.lrc / embedded), playqueue, m3u
+                  # QML singletons: library (views, mixes, M3U, watcher, scan thread),
                   #   player (QMediaPlayer, queue persistence), waveform (QAudioDecoder)
                   # mpris: org.mpris.MediaPlayer2 over QtDBus
   qml/Main.qml    # ports ui-demo.html v3; `import Flow` for Library / Player
-  tests/          # QtTest: playqueue, scanner, lyrics, waveform, library, player, mpris
+  data/           # flow.desktop, flow.svg (app icon, also embedded as the window icon)
+  packaging/arch/ # PKGBUILD (builds this checkout's committed HEAD)
+  tests/          # QtTest: playqueue, scanner, lyrics, m3u, waveform, library, player, mpris
   STACK.md (this file)
   ui-demo.html    # clickable design spec (served via python http.server :8000)
 ```
 
-Build + test: `cmake -S . -B build -G Ninja && cmake --build build && (cd build && ctest)`
+Dev build + tests: `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug && cmake --build build && ctest --test-dir build`
 (tst_player / tst_waveform play or decode short silent WAVs; tst_mpris runs on a private
 bus via dbus-run-session.)
-Run: `build/flow --library=/path/to/music` (remembered; default `~/Music`).
+Release + install: `cmake -S . -B build-release -G Ninja && cmake --build build-release &&
+sudo cmake --install build-release` — or on Arch: `cd packaging/arch && makepkg -si`.
+Run: `flow --library /path/to/music` (remembered; default `~/Music`). `flow --help`.
 Index: `~/.local/share/Flow/Flow/library.db`, cover cache: `~/.cache/Flow/Flow/covers/`.
 Settings + saved queue: `~/.config/Flow/Flow.conf`.
 
-## Status (v1 feature-complete)
-- Playback: QMediaPlayer transport, seek, volume, shuffle/repeat, queue (play next / add /
-  remove / drag-reorder), synced lyrics, unplayable files skipped, queue + position restored
-  on launch (paused).
+## Status (v1 complete)
+- Playback: QMediaPlayer transport, seek, volume, shuffle, repeat off / all / one, queue
+  (play next / add / remove / drag-reorder), synced lyrics, unplayable files skipped, queue +
+  position restored on launch (paused).
 - Library: TagLib scan → SQLite, incremental rescans, QFileSystemWatcher, likes, embedded +
   folder cover art, search / format filters / sorts.
 - Views: Overview, Albums grid → album detail, Tracks, Liked, mixes (create / rename /
-  delete, + MIX from any track, remove, drag-reorder). Deleted files leave mixes (FK cascade).
+  delete, + MIX from any track, remove, drag-reorder, M3U import / export). Deleted files
+  leave mixes (FK cascade).
 - Waveform: real RMS overview per track, decoded at 8 kHz mono, cached in the index.
-- MPRIS: playerctl / Hyprland keybinds / shell widgets (metadata + art, seek, volume, loop,
-  shuffle, Raise, Quit).
+- MPRIS: playerctl / Hyprland keybinds / shell widgets (metadata + art, seek, volume, loop
+  None/Playlist/Track, shuffle, Raise, Quit).
+- Layout: full 3-pane → drawer slide-over (<1080px) → rail as overlay behind ☰ (<820px);
+  dock and filter chips adapt down to the 560px minimum.
+- Desktop integration: .desktop entry + icon, Wayland app_id `flow`.
 
-Known gaps / ideas:
-- The rail (Albums, mixes) is hidden below ~820px wide; narrow windows have no way in yet.
-- No gapless playback (QtMultimedia limit, see above). No single-track repeat.
-- Mixes cannot be reordered in the rail; there is no import/export (M3U).
+Deliberately not in v1:
+- Gapless playback (QtMultimedia limit; escape hatch above: QAudioSink + decoder pipeline).
+- Editing tags, streaming / remote sources, multiple library folders.
