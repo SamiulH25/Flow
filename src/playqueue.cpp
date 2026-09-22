@@ -102,6 +102,22 @@ void PlayQueue::replace(const QList<Track> &tracks, int start)
     emit currentIndexChanged();
 }
 
+void PlayQueue::restore(const QList<Track> &tracks, int current)
+{
+    beginResetModel();
+    m_entries.clear();
+    m_original.clear();
+    for (const Track &t : tracks)
+        m_entries.append(makeEntry(t));
+    // The pre-shuffle order is not saved; unshuffling keeps this order.
+    if (m_shuffled)
+        m_original = m_entries;
+    m_current = m_entries.isEmpty() ? -1 : qBound(0, current, count() - 1);
+    endResetModel();
+    emit countChanged();
+    emit currentIndexChanged();
+}
+
 void PlayQueue::insertNext(const Track &track)
 {
     const Entry e = makeEntry(track);

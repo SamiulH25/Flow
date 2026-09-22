@@ -38,6 +38,8 @@ public:
     bool isShuffled() const { return m_shuffled; }
 
     void replace(const QList<Track> &tracks, int start);
+    // Puts back a saved queue in exactly this order (no reshuffle).
+    void restore(const QList<Track> &tracks, int current);
     void insertNext(const Track &track);
     void append(const Track &track);
     void removeAt(int row);

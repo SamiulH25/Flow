@@ -6,6 +6,7 @@
 #include <QAudioOutput>
 #include <QMediaPlayer>
 #include <QObject>
+#include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
@@ -109,6 +110,8 @@ private:
     void onTrackUpdated(qint64 id);
     void onLibraryReloaded();
     void saveSettings() const;
+    void saveQueue() const;
+    void restoreQueue();
     void setError(const QString &error);
 
     static inline Player *s_instance = nullptr;
@@ -123,6 +126,8 @@ private:
     qreal m_volume = 0.7;
     bool m_repeat = false;
     int m_errorStreak = 0;       // consecutive unplayable tracks, stops skip loops
+    qint64 m_pendingSeekMs = -1; // restored position, applied once the media loads
+    QTimer m_saveQueueTimer;
     Lyrics m_lyrics;
     QVariantList m_lyricsList;
     int m_lyricIndex = -1;

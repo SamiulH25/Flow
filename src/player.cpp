@@ -45,12 +45,57 @@ Player::Player(Library *library, QObject *parent)
     connect(m_library, &Library::trackUpdated, this, &Player::onTrackUpdated);
     connect(m_library, &Library::reloaded, this, &Player::onLibraryReloaded);
 
+    // Save the queue shortly after edits (crash safety) and again on exit.
+    m_saveQueueTimer.setSingleShot(true);
+    m_saveQueueTimer.setInterval(1000);
+    connect(&m_saveQueueTimer, &QTimer::timeout, this, &Player::saveQueue);
+    connect(this, &Player::queueChanged, &m_saveQueueTimer, qOverload<>(&QTimer::start));
+
+    restoreQueue();
     refreshCurrentMap();
 }
 
 Player::~Player()
 {
+    saveQueue();
     m_player.stop();
+}
+
+void Player::saveQueue() const
+{
+    QVariantList ids;
+    for (int i = 0; i < m_queue.count(); ++i)
+        ids.append(m_queue.at(i)->id);
+    QSettings settings;
+    settings.setValue(QStringLiteral("queue/ids"), ids);
+    settings.setValue(QStringLiteral("queue/index"), m_queue.currentIndex());
+    // Before the media has loaded, m_player reports 0; keep the restored spot.
+    const qint64 pos = m_pendingSeekMs >= 0 ? m_pendingSeekMs : m_player.position();
+    settings.setValue(QStringLiteral("queue/positionMs"), pos);
+}
+
+void Player::restoreQueue()
+{
+    const QSettings settings;
+    const QVariantList ids = settings.value(QStringLiteral("queue/ids")).toList();
+    const int savedIndex = settings.value(QStringLiteral("queue/index"), -1).toInt();
+    QList<Track> tracks;
+    int current = -1;
+    for (int i = 0; i < ids.size(); ++i) {
+        const Track *t = m_library->trackById(ids.at(i).toLongLong());
+        if (!t)
+            continue;   // deleted since last run
+        if (i == savedIndex)
+            current = int(tracks.size());
+        tracks.append(*t);
+    }
+    if (tracks.isEmpty())
+        return;
+    const bool sameTrack = current >= 0;
+    m_queue.restore(tracks, sameTrack ? current : qMin(qMax(savedIndex, 0), int(tracks.size()) - 1));
+    loadCurrent(false);   // ready to resume, but never start playing on launch
+    if (sameTrack)
+        m_pendingSeekMs = settings.value(QStringLiteral("queue/positionMs"), 0).toLongLong();
 }
 
 Player *Player::create(QQmlEngine *, QJSEngine *jsEngine)
@@ -144,6 +189,7 @@ void Player::refreshCurrentMap()
 
 void Player::loadCurrent(bool autoplay)
 {
+    m_pendingSeekMs = -1;   // any explicit load supersedes a restored position
     const Track *t = m_queue.current();
     const quint64 uid = m_queue.uidAt(m_queue.currentIndex());
 
@@ -194,6 +240,11 @@ void Player::onMediaStatus(QMediaPlayer::MediaStatus status)
     if (status == QMediaPlayer::BufferedMedia || status == QMediaPlayer::LoadedMedia) {
         m_errorStreak = 0;
         setError(QString());
+        if (m_pendingSeekMs >= 0) {
+            const qint64 ms = m_pendingSeekMs;
+            m_pendingSeekMs = -1;
+            m_player.setPosition(ms);
+        }
         return;
     }
     if (status != QMediaPlayer::EndOfMedia)
@@ -338,6 +389,7 @@ void Player::seek(qreal seconds)
         return;
     const qreal len = duration();
     seconds = qBound(0.0, seconds, len > 0 ? len : seconds);
+    m_pendingSeekMs = -1;   // the user's seek wins over a restored position
     m_player.setPosition(qint64(seconds * 1000));
     emit seeked(seconds);
 }

@@ -189,6 +189,31 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(p.playing(), 5000);
     }
 
+    void queueSurvivesRestart()
+    {
+        Player &p = *m_player;
+        p.playTracks(m_lib->visibleTrackIds(), rowOfTitle(*m_lib, QStringLiteral("c")));
+        QTRY_VERIFY_WITH_TIMEOUT(p.playing(), 5000);
+        p.pause();
+        p.seek(1.25);
+        QTRY_VERIFY(p.position() >= 1.2);
+        const qint64 cur = p.currentId();
+        const int count = p.queueCount();
+        const int index = p.queueIndex();
+
+        m_player.reset();                                    // saves on destruction
+        m_player = std::make_unique<Player>(m_lib.get());    // restores
+        Player &q = *m_player;
+        QCOMPARE(q.queueCount(), count);
+        QCOMPARE(q.queueIndex(), index);
+        QCOMPARE(q.currentId(), cur);
+        QVERIFY(!q.playing());                               // never autoplays on launch
+        QTRY_VERIFY_WITH_TIMEOUT(qAbs(q.position() - 1.25) < 0.1, 5000);
+        q.play();
+        QTRY_VERIFY_WITH_TIMEOUT(q.playing(), 5000);
+        QVERIFY(q.position() >= 1.2);
+    }
+
     void clearStops()
     {
         Player &p = *m_player;
@@ -197,6 +222,11 @@ private slots:
         QTRY_VERIFY(!p.playing());
         QCOMPARE(p.currentId(), -1);
         QCOMPARE(p.current().value(QStringLiteral("t")).toString(), QString());
+
+        m_player.reset();                                    // an empty queue stays empty
+        m_player = std::make_unique<Player>(m_lib.get());
+        QCOMPARE(m_player->queueCount(), 0);
+        QVERIFY(!m_player->hasTrack());
     }
 
     void cleanupTestCase()
