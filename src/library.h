@@ -10,6 +10,8 @@
 #include <QObject>
 #include <QThread>
 #include <QTimer>
+#include <QUrl>
+#include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
 #include <atomic>
@@ -173,6 +175,11 @@ public:
     Q_INVOKABLE void moveInMix(qint64 mixId, int fromSlot, int toSlot);
     Q_INVOKABLE QVariantList mixTrackIds(qint64 mixId) const;
 
+    // M3U: import makes a new mix from the entries found in the library;
+    // result {ok, mixId, added, skipped, error}. Export writes .m3u8.
+    Q_INVOKABLE QVariantMap importMix(const QUrl &file);
+    Q_INVOKABLE QVariantMap exportMix(qint64 mixId, const QUrl &file);
+
 signals:
     void queryChanged();
     void formatChanged();
@@ -206,6 +213,7 @@ private:
 
     QList<Track> m_tracks;
     QHash<qint64, int> m_indexById;
+    QHash<QString, int> m_indexByPath;
     QList<qint64> m_albumAddedAt;   // per track: newest added_at of its album
     int m_likedCount = 0;
     TrackListModel m_trackModel;

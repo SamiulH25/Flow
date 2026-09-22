@@ -1,9 +1,13 @@
 #include "library.h"
 
 #include "libraryscanner.h"
+#include "m3u.h"
 
 #include <QCollator>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
 #include <QJSEngine>
 #include <QLocale>
 #include <QSet>
@@ -209,11 +213,8 @@ const Track *Library::trackById(qint64 id) const
 
 const Track *Library::trackByPath(const QString &path) const
 {
-    for (const Track &t : m_tracks) {
-        if (t.path == path)
-            return &t;
-    }
-    return nullptr;
+    const auto it = m_indexByPath.constFind(path);
+    return it == m_indexByPath.cend() ? nullptr : &m_tracks.at(*it);
 }
 
 QByteArray Library::cachedPeaks(qint64 id)
@@ -269,6 +270,7 @@ void Library::reload()
     const QString prefix = m_musicDir + u'/';
     m_tracks.clear();
     m_indexById.clear();
+    m_indexByPath.clear();
     m_likedCount = 0;
     if (m_db.isOpen()) {
         // The index may still hold tracks of a previously used music folder;
@@ -278,6 +280,7 @@ void Library::reload()
             if (!t.path.startsWith(prefix))
                 continue;
             m_indexById.insert(t.id, int(m_tracks.size()));
+            m_indexByPath.insert(t.path, int(m_tracks.size()));
             m_tracks.append(t);
             if (t.liked)
                 ++m_likedCount;
@@ -762,4 +765,65 @@ QVariantList Library::mixTrackIds(qint64 mixId) const
             out.append(id);
     }
     return out;
+}
+
+// ---------------------------------------------------------------- M3U
+
+QVariantMap Library::importMix(const QUrl &file)
+{
+    const auto fail = [](const QString &error) {
+        return QVariantMap{{QStringLiteral("ok"), false}, {QStringLiteral("error"), error}};
+    };
+    const QString path = file.isLocalFile() ? file.toLocalFile() : file.toString();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return fail(QStringLiteral("Could not open %1").arg(QFileInfo(path).fileName()));
+    const QStringList entries = M3u::parse(M3u::decode(f.readAll()), QFileInfo(path).absolutePath());
+
+    QList<qint64> ids;
+    int skipped = 0;
+    for (const QString &entry : entries) {
+        // Symlinked folders: fall back to the canonical path.
+        const Track *t = trackByPath(entry);
+        if (!t)
+            t = trackByPath(QFileInfo(entry).canonicalFilePath());
+        if (t)
+            ids.append(t->id);
+        else
+            ++skipped;
+    }
+    if (ids.isEmpty())
+        return fail(entries.isEmpty() ? QStringLiteral("The playlist is empty")
+                                      : QStringLiteral("None of its %1 tracks are in your library").arg(entries.size()));
+
+    const qint64 mixId = createMix(QFileInfo(path).completeBaseName());
+    if (mixId < 0)
+        return fail(m_error);
+    const int row = m_mixModel.rowOf(mixId);
+    m_mixModel.mixes()[row].trackIds = ids;
+    if (!saveMix(row))
+        return fail(m_error);
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("mixId"), mixId},
+            {QStringLiteral("added"), int(ids.size())}, {QStringLiteral("skipped"), skipped}};
+}
+
+QVariantMap Library::exportMix(qint64 mixId, const QUrl &file)
+{
+    const auto fail = [](const QString &error) {
+        return QVariantMap{{QStringLiteral("ok"), false}, {QStringLiteral("error"), error}};
+    };
+    const int row = m_mixModel.rowOf(mixId);
+    if (row < 0)
+        return fail(QStringLiteral("No such mix"));
+    QList<Track> tracks;
+    for (qint64 id : m_mixModel.mixes().at(row).trackIds) {
+        if (const Track *t = trackById(id))
+            tracks.append(*t);
+    }
+    const QString path = file.isLocalFile() ? file.toLocalFile() : file.toString();
+    // QSaveFile: an interrupted write never leaves a truncated playlist behind.
+    QSaveFile out(path);
+    if (!out.open(QIODevice::WriteOnly) || out.write(M3u::write(tracks)) < 0 || !out.commit())
+        return fail(QStringLiteral("Could not write %1").arg(QFileInfo(path).fileName()));
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("added"), int(tracks.size())}};
 }

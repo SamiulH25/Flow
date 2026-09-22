@@ -20,6 +20,7 @@ qt_add_library(flowcore STATIC
     src/libraryscanner.h src/libraryscanner.cpp
     src/lyrics.h src/lyrics.cpp
     src/playqueue.h src/playqueue.cpp
+    src/m3u.h src/m3u.cpp
 )
 target_include_directories(flowcore PUBLIC src)
 target_link_libraries(flowcore PUBLIC Qt6::Core Qt6::Sql TagLib::tag)
@@ -49,7 +50,7 @@ install(TARGETS flow RUNTIME DESTINATION bin)
 if(FLOW_BUILD_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     enable_testing()
-    foreach(name tst_playqueue tst_scanner tst_lyrics)
+    foreach(name tst_playqueue tst_scanner tst_lyrics tst_m3u)
         qt_add_executable(${name} tests/${name}.cpp)
         target_link_libraries(${name} PRIVATE flowcore Qt6::Test)
         add_test(NAME ${name} COMMAND ${name})

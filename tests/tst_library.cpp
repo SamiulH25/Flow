@@ -3,6 +3,8 @@
 #include "librarydb.h"
 
 #include <QFile>
+#include <QFileInfo>
+#include <QUrl>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
@@ -166,6 +168,41 @@ private slots:
         lib.showMix(mixId);
         QCOMPARE(lib.viewTitle(), QStringLiteral("Deep Focus"));
         QCOMPARE(titles(lib), (QStringList{QStringLiteral("Three"), QStringLiteral("One")}));
+    }
+
+    void m3uRoundTrip()
+    {
+        Library &lib = *m_lib;
+        const qint64 mix = lib.viewMixId();
+        const QString file = m_tmp.filePath(QStringLiteral("lists/Deep Focus.m3u8"));
+        QVERIFY(QDir().mkpath(QFileInfo(file).absolutePath()));
+        QVariantMap r = lib.exportMix(mix, QUrl::fromLocalFile(file));
+        QVERIFY2(r.value(QStringLiteral("ok")).toBool(), qPrintable(r.value(QStringLiteral("error")).toString()));
+        QCOMPARE(r.value(QStringLiteral("added")).toInt(), 2);
+
+        // Hand-edit it: a relative entry, a missing file and a stream.
+        QFile f(file);
+        QVERIFY(f.open(QIODevice::Append));
+        f.write("../music/a2.wav\n/nowhere/gone.flac\nhttp://example.com/live\n");
+        f.close();
+
+        r = lib.importMix(QUrl::fromLocalFile(file));
+        QVERIFY2(r.value(QStringLiteral("ok")).toBool(), qPrintable(r.value(QStringLiteral("error")).toString()));
+        QCOMPARE(r.value(QStringLiteral("added")).toInt(), 3);
+        QCOMPARE(r.value(QStringLiteral("skipped")).toInt(), 1);
+        const qint64 imported = r.value(QStringLiteral("mixId")).toLongLong();
+        lib.showMix(imported);
+        QCOMPARE(lib.viewTitle(), QStringLiteral("Deep Focus"));
+        QCOMPARE(titles(lib), (QStringList{QStringLiteral("Three"), QStringLiteral("One"), QStringLiteral("Two")}));
+
+        const QString junk = m_tmp.filePath(QStringLiteral("lists/none.m3u"));
+        QVERIFY(QFile(junk).open(QIODevice::WriteOnly));
+        QVERIFY(!lib.importMix(QUrl::fromLocalFile(junk)).value(QStringLiteral("ok")).toBool());
+        QVERIFY(!lib.importMix(QUrl::fromLocalFile(m_tmp.filePath(QStringLiteral("missing.m3u"))))
+                     .value(QStringLiteral("ok")).toBool());
+
+        lib.deleteMix(imported);
+        lib.showMix(mix);
     }
 
     void deletedTracksLeaveMixes()

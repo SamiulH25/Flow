@@ -3,6 +3,8 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
+import QtQuick.Dialogs
+import QtCore
 import Flow
 
 ApplicationWindow {
@@ -193,6 +195,39 @@ ApplicationWindow {
         }
     }
 
+    // ---- M3U import / export + a short status toast ----
+    FileDialog {
+        id: importDialog
+        title: "Import playlist"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Playlists (*.m3u *.m3u8)", "All files (*)"]
+        currentFolder: StandardPaths.writableLocation(StandardPaths.MusicLocation)
+        onAccepted: {
+            const r = Library.importMix(selectedFile);
+            if (!r.ok) { showToast("Import failed: " + r.error); return; }
+            page = "tracks"; railOpen = false;
+            Library.showMix(r.mixId);
+            showToast("Imported " + r.added + (r.added === 1 ? " track" : " tracks")
+                      + (r.skipped > 0 ? " · " + r.skipped + " not in your library" : ""));
+        }
+    }
+    FileDialog {
+        id: exportDialog
+        property var mixId: -1
+        title: "Export mix"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "m3u8"
+        nameFilters: ["M3U8 playlist (*.m3u8)"]
+        onAccepted: {
+            const r = Library.exportMix(mixId, selectedFile);
+            showToast(r.ok ? "Exported " + r.added + (r.added === 1 ? " track" : " tracks")
+                           : "Export failed: " + r.error);
+        }
+    }
+    property bool toastShown: false
+    function showToast(text) { toast.text = text; toastShown = true; toastTimer.restart(); }
+    Timer { id: toastTimer; interval: 3500; onTriggered: toastShown = false }
+
     // ================= header =================
     Rectangle {
         id: chrome
@@ -310,7 +345,16 @@ ApplicationWindow {
                         }
                     }
                 }
-                Text { text: "MIXES"; color: dim; font.pixelSize: 10; font.family: mono; leftPadding: 10; topPadding: 12; bottomPadding: 6 }
+                Item {
+                    width: parent.width; height: mixesLabel.implicitHeight
+                    Text { id: mixesLabel; text: "MIXES"; color: dim; font.pixelSize: 10; font.family: mono; leftPadding: 10; topPadding: 12; bottomPadding: 6 }
+                    Text {
+                        anchors { right: parent.right; bottom: parent.bottom; rightMargin: 8; bottomMargin: 6 }
+                        text: "IMPORT"; font.pixelSize: 10; font.family: mono
+                        color: importHover.containsMouse ? ink : dim
+                        MouseArea { id: importHover; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true; onClicked: importDialog.open() }
+                    }
+                }
                 Repeater {
                     id: mixRepeater
                     model: Library.mixes
@@ -492,6 +536,23 @@ ApplicationWindow {
                         const modes = ["def", "title", "artist", "dur"];
                         Library.sortMode = modes[(modes.indexOf(Library.sortMode) + 1) % modes.length];
                     } }
+                }
+                Rectangle {
+                    visible: Library.viewKind === "mix"
+                    height: 30; width: exportLabel.implicitWidth + 26; radius: 9
+                    color: exportHover.containsMouse ? "#1e1e25" : panel; border.color: line2; border.width: 1
+                    Text { id: exportLabel; anchors.centerIn: parent; text: "EXPORT M3U"; color: ink; font.pixelSize: 11; font.family: mono }
+                    MouseArea {
+                        id: exportHover
+                        anchors.fill: parent; hoverEnabled: true
+                        onClicked: {
+                            exportDialog.mixId = Library.viewMixId;
+                            const folder = StandardPaths.writableLocation(StandardPaths.MusicLocation);
+                            exportDialog.currentFolder = folder;
+                            exportDialog.selectedFile = folder + "/" + encodeURIComponent(Library.viewTitle.replace(/\//g, "-")) + ".m3u8";
+                            exportDialog.open();
+                        }
+                    }
                 }
                 Rectangle {
                     visible: Library.shownCount > 0
@@ -870,6 +931,17 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    Rectangle {
+        id: toastBox
+        anchors { horizontalCenter: parent.horizontalCenter; bottom: dock.top; bottomMargin: 14 }
+        z: 20; radius: 10; height: 36; width: Math.min(root.width - 32, toast.implicitWidth + 32)
+        color: panel; border.color: line2; border.width: 1
+        opacity: toastShown ? 1 : 0; visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 200 } }
+        Text { id: toast; anchors.centerIn: parent; width: parent.width - 32
+               color: ink; font.pixelSize: 12; elide: Text.ElideRight; horizontalAlignment: Text.AlignHCenter }
     }
 
     // ================= dock =================
