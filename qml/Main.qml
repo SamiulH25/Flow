@@ -36,6 +36,9 @@ ApplicationWindow {
     readonly property var cur: Player.current
     readonly property real progress: Player.duration > 0 ? Math.min(1, Player.position / Player.duration) : 0
     property string drawerTab: "now" // now | queue | lyrics
+    property string page: "tracks"   // tracks | albums (album/mix detail = tracks + Library view)
+    property bool tracksOnly: false   // "Tracks" hides the album strip that "Overview" shows
+    property bool albumsFromGrid: false  // where "← BACK" from an album returns to
     property bool drawerOpen: true
     // Decorative waveform, deterministic per track (real peaks need a decoder pass).
     readonly property var peaks: makePeaks(Player.currentId)
@@ -43,6 +46,16 @@ ApplicationWindow {
     function fmtTime(s) {
         s = Math.max(0, Math.floor(s));
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    }
+    function goTo(k) {
+        if (k === "albums") { page = "albums"; return; }
+        page = "tracks";
+        tracksOnly = k === "tracks";
+        Library.showAll();
+        Library.format = k === "liked" ? "Liked" : "All";
+    }
+    function nextMixName() {
+        return "Mix " + (mixRepeater.count + 1);
     }
     function makePeaks(seed) {
         const p = [];
@@ -115,6 +128,78 @@ ApplicationWindow {
         }
     }
 
+    // Album tile: click opens the album, the round button plays it.
+    component AlbumCard: Item {
+        id: card
+        property bool fromGrid: false
+        height: width + 58
+        Art {
+            id: cardArt
+            width: card.width; height: card.width
+            source: cover; c1: model.c1; c2: model.c2
+            accentSize: width * 0.5; accentX: (albumIndex % 3) * width * 0.22 - 8; accentY: (albumIndex % 2) * width * 0.26 - 10
+            decodeSize: 300
+            Row {
+                x: 8; y: 8; spacing: 5
+                Rectangle { height: 18; width: 40; radius: 9; color: "#00000099";
+                    Text { anchors.centerIn: parent; text: f; color: "#fff"; font.pixelSize: 9; font.family: mono } }
+                Rectangle { height: 18; width: 52; radius: 9; color: acc; visible: hi;
+                    Text { anchors.centerIn: parent; text: "HI-RES"; color: "#101204"; font.pixelSize: 9; font.family: mono; font.bold: true } }
+            }
+        }
+        Text { y: card.width + 6; width: card.width; text: al; color: ink; font.pixelSize: 13; font.family: disp; elide: Text.ElideRight }
+        Text { y: card.width + 25; width: card.width; text: khz !== "" ? a + " · " + khz : a; color: mut; font.pixelSize: 12; elide: Text.ElideRight }
+        MouseArea {
+            id: cardHover
+            anchors.fill: parent; hoverEnabled: true
+            onClicked: { albumsFromGrid = card.fromGrid; page = "tracks"; Library.showAlbum(albumIndex); }
+        }
+        Rectangle {
+            x: card.width - 44; y: card.width - 44; width: 36; height: 36; radius: 18
+            visible: cardHover.containsMouse || playHover.containsMouse
+            color: playHover.containsMouse ? ink : acc
+            Text { anchors.centerIn: parent; anchors.horizontalCenterOffset: 1; text: "▶"; color: "#000"; font.pixelSize: 13 }
+            MouseArea { id: playHover; anchors.fill: parent; hoverEnabled: true; onClicked: Player.playTracks(Library.albumTrackIds(albumIndex), 0) }
+        }
+    }
+
+    component FlowMenuItem: MenuItem {
+        id: fmi
+        implicitHeight: 32
+        contentItem: Text {
+            leftPadding: 6; text: fmi.text; color: fmi.enabled ? ink : dim
+            font.pixelSize: 13; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
+        }
+        background: Rectangle { color: fmi.highlighted ? "#1e1e25" : "transparent"; radius: 7 }
+    }
+
+    // "+ MIX" on a track row
+    Menu {
+        id: mixMenu
+        property var trackId: -1
+        padding: 6
+        background: Rectangle { implicitWidth: 220; color: panel; border.color: line2; border.width: 1; radius: 10 }
+        FlowMenuItem { text: "ADD TO MIX"; enabled: false }
+        Instantiator {
+            model: Library.mixes
+            delegate: FlowMenuItem {
+                required property var mixId
+                required property string name
+                text: name
+                onTriggered: Library.addToMix(mixId, mixMenu.trackId)
+            }
+            onObjectAdded: (index, object) => mixMenu.insertItem(index + 1, object)
+            onObjectRemoved: (index, object) => mixMenu.removeItem(object)
+        }
+        FlowMenuItem {
+            text: "+  New mix"
+            onTriggered: {
+                const id = Library.createMix(nextMixName());
+                if (id >= 0) Library.addToMix(id, mixMenu.trackId);
+            }
+        }
+    }
+
     // ================= header =================
     Rectangle {
         id: chrome
@@ -184,16 +269,24 @@ ApplicationWindow {
             anchors { top: parent.top; left: parent.left; bottom: parent.bottom }
             width: 224; color: bg; visible: !narrow
             Rectangle { anchors { top: parent.top; right: parent.right; bottom: parent.bottom } width: 1; color: line }
-            Column {
+            Flickable {
                 anchors { fill: parent; margins: 12 }
+                contentHeight: railCol.height; clip: true
+                boundsBehavior: Flickable.StopAtBounds
+            Column {
+                id: railCol
+                width: parent.width
                 spacing: 2
                 Text { text: "LIBRARY"; color: dim; font.pixelSize: 10; font.family: mono; leftPadding: 10; topPadding: 6; bottomPadding: 6 }
                 Repeater {
                     model: [
-                        {t: "◈  Overview", on: Library.format !== "Liked", f: "All"},
-                        {t: "◎  Albums", on: false, f: ""},
-                        {t: "♫  Tracks · " + Library.totalCount.toLocaleString(Qt.locale(), "f", 0), on: false, f: "All"},
-                        {t: "♥  Liked · " + Library.likedCount, on: Library.format === "Liked", f: "Liked"}
+                        {t: "◈  Overview", k: "overview",
+                         on: page === "tracks" && !tracksOnly && Library.viewKind === "all" && Library.format !== "Liked"},
+                        {t: "◎  Albums", k: "albums", on: page === "albums" || Library.viewKind === "album"},
+                        {t: "♫  Tracks · " + Library.totalCount.toLocaleString(Qt.locale(), "f", 0), k: "tracks",
+                         on: page === "tracks" && tracksOnly && Library.viewKind === "all" && Library.format !== "Liked"},
+                        {t: "♥  Liked · " + Library.likedCount, k: "liked",
+                         on: page === "tracks" && Library.viewKind === "all" && Library.format === "Liked"}
                     ]
                     Rectangle {
                         width: parent.width; height: 34; radius: 9
@@ -202,23 +295,83 @@ ApplicationWindow {
                         MouseArea {
                             id: railHover
                             anchors.fill: parent; hoverEnabled: true
-                            onClicked: if (modelData.f !== "") Library.format = modelData.f
+                            onClicked: goTo(modelData.k)
                         }
                     }
                 }
                 Text { text: "MIXES"; color: dim; font.pixelSize: 10; font.family: mono; leftPadding: 10; topPadding: 12; bottomPadding: 6 }
                 Repeater {
-                    // TODO(Mixes): playlists are not stored yet.
-                    model: ["Late Night Drive", "Deep Focus", "Gym Energy", "Chill Sunday"]
+                    id: mixRepeater
+                    model: Library.mixes
                     Rectangle {
-                        width: parent.width; height: 32; radius: 9; color: index === 0 ? "#1e1e25" : "transparent"
+                        id: mixRow
+                        readonly property bool on: page === "tracks" && Library.viewKind === "mix" && Library.viewMixId === mixId
+                        property bool renaming: false
+                        property bool confirmDelete: false
+                        width: parent.width; height: 32; radius: 9
+                        color: on ? "#1e1e25" : mixHover.containsMouse ? "#1a1a20" : "transparent"
+                        MouseArea {
+                            id: mixHover
+                            anchors.fill: parent; hoverEnabled: true
+                            onClicked: { page = "tracks"; Library.showMix(mixId); }
+                            onDoubleClicked: mixRow.renaming = true
+                            onExited: mixRow.confirmDelete = false
+                        }
                         Row {
-                            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                            anchors { fill: parent; leftMargin: 10; rightMargin: 8 }
                             spacing: 9
-                            Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: index === 0 ? acc : "#3a3a42" }
-                            Text { anchors.verticalCenter: parent.verticalCenter; text: modelData; color: "#cfccc2"; font.pixelSize: 13 }
+                            visible: !mixRow.renaming
+                            Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: mixRow.on ? acc : "#3a3a42" }
+                            Text { anchors.verticalCenter: parent.verticalCenter; width: parent.width - 60; text: name; color: "#cfccc2"; font.pixelSize: 13; elide: Text.ElideRight }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter; width: 26; horizontalAlignment: Text.AlignRight
+                                text: mixRow.confirmDelete ? "del?" : mixHover.containsMouse || delArea.containsMouse ? "✕" : count
+                                color: mixRow.confirmDelete ? "#ff8a7a" : delArea.containsMouse ? ink : dim
+                                font.pixelSize: 10; font.family: mono
+                                MouseArea {
+                                    id: delArea
+                                    anchors.fill: parent; anchors.margins: -4; hoverEnabled: true
+                                    // Two clicks: the first arms, the second deletes.
+                                    onClicked: {
+                                        if (mixRow.confirmDelete) Library.deleteMix(mixId);
+                                        else mixRow.confirmDelete = true;
+                                    }
+                                    onExited: mixRow.confirmDelete = false
+                                }
+                            }
+                        }
+                        TextField {
+                            anchors { fill: parent; leftMargin: 4; rightMargin: 4 }
+                            visible: mixRow.renaming
+                            text: name; color: ink; font.pixelSize: 13
+                            background: Rectangle { radius: 7; color: panel2; border.color: line2 }
+                            onVisibleChanged: if (visible) { forceActiveFocus(); selectAll(); }
+                            onAccepted: { Library.renameMix(mixId, text); mixRow.renaming = false; }
+                            onActiveFocusChanged: if (!activeFocus) mixRow.renaming = false
+                            Keys.onEscapePressed: mixRow.renaming = false
                         }
                     }
+                }
+                Rectangle {
+                    width: parent.width; height: 32; radius: 9
+                    color: newMixHover.containsMouse ? "#1a1a20" : "transparent"
+                    Text {
+                        anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 10 }
+                        text: "+  New mix"; color: newMixHover.containsMouse ? ink : dim; font.pixelSize: 13
+                    }
+                    MouseArea {
+                        id: newMixHover
+                        anchors.fill: parent; hoverEnabled: true
+                        onClicked: {
+                            const id = Library.createMix(nextMixName());
+                            if (id >= 0) { page = "tracks"; Library.showMix(id); }
+                        }
+                    }
+                }
+                Text {
+                    width: parent.width; leftPadding: 10; topPadding: 2; wrapMode: Text.WordWrap
+                    visible: mixRepeater.count > 0
+                    text: "Double-click a mix to rename it."; color: dim; font.pixelSize: 10
                 }
                 Item { width: 1; height: 12 }
                 Rectangle {
@@ -234,6 +387,7 @@ ApplicationWindow {
                     }
                 }
             }
+            }
         }
 
         // ---- center ----
@@ -244,22 +398,52 @@ ApplicationWindow {
                 left: parent.left; leftMargin: narrow ? 0 : 224
                 right: parent.right; rightMargin: mid ? 0 : 322
             }
-            Text {
+            // header: back · title · counts
+            Item {
                 id: listhead
                 anchors { top: parent.top; left: parent.left; right: parent.right; topMargin: 14; leftMargin: 24; rightMargin: 24 }
                 height: 28
-                text: "<font face='" + disp + "' size='4' color='" + ink + "'><b>Collection</b></font>"
-                      + "<font face='" + mono + "' size='2' color='" + dim + "'>&nbsp;&nbsp;&nbsp;"
-                      + Library.shownCount.toLocaleString(Qt.locale(), "f", 0) + " shown · "
-                      + Library.totalCount.toLocaleString(Qt.locale(), "f", 0) + " tracks"
-                      + (Library.scanning ? " · scanning " + Library.scanProgress + "…" : "") + "</font>"
-                textFormat: Text.RichText; verticalAlignment: Text.AlignVCenter
-                elide: Text.ElideRight
+                readonly property bool detail: page === "tracks" && Library.viewKind !== "all"
+                Row {
+                    anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter }
+                    spacing: 12
+                    Rectangle {
+                        visible: listhead.detail
+                        anchors.verticalCenter: parent.verticalCenter
+                        height: 24; width: backLabel.implicitWidth + 18; radius: 7
+                        color: backHover.containsMouse ? "#1e1e25" : "transparent"; border.color: line2; border.width: 1
+                        Text { id: backLabel; anchors.centerIn: parent; text: "← BACK"; color: ink; font.pixelSize: 10; font.family: mono }
+                        MouseArea {
+                            id: backHover
+                            anchors.fill: parent; hoverEnabled: true
+                            onClicked: {
+                                const fromAlbum = Library.viewKind === "album";
+                                Library.showAll();
+                                if (fromAlbum && albumsFromGrid) page = "albums";
+                            }
+                        }
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - (listhead.detail ? backLabel.implicitWidth + 30 : 0)
+                        textFormat: Text.RichText; elide: Text.ElideRight
+                        text: "<font face='" + disp + "' size='4' color='" + ink + "'><b>"
+                              + (page === "albums" ? "Albums" : Library.viewTitle.replace(/&/g, "&amp;").replace(/</g, "&lt;")) + "</b></font>"
+                              + "<font face='" + mono + "' size='2' color='" + dim + "'>&nbsp;&nbsp;&nbsp;"
+                              + (page === "albums"
+                                 ? albumGrid.count + " albums"
+                                 : (Library.viewSubtitle !== "" ? Library.viewSubtitle.replace(/&/g, "&amp;").replace(/</g, "&lt;") + " · " : "")
+                                   + Library.shownCount.toLocaleString(Qt.locale(), "f", 0) + " shown"
+                                   + (Library.viewKind === "all" ? " · " + Library.totalCount.toLocaleString(Qt.locale(), "f", 0) + " tracks" : ""))
+                              + (Library.scanning ? " · scanning " + Library.scanProgress + "…" : "") + "</font>"
+                    }
+                }
             }
             Row {
                 id: chips
                 anchors { top: listhead.bottom; left: parent.left; right: parent.right; topMargin: 6; leftMargin: 24; rightMargin: 24 }
                 height: 36; spacing: 8
+                visible: page === "tracks"
                 Repeater {
                     model: ["All", "FLAC", "MP3", "WAV", "Liked"]
                     Rectangle {
@@ -280,39 +464,50 @@ ApplicationWindow {
                 Rectangle {
                     height: 30; width: sortLabel.implicitWidth + 26; radius: 9
                     color: panel; border.color: line2; border.width: 1
-                    Text { id: sortLabel; anchors.centerIn: parent; color: ink; font.pixelSize: 12; font.family: mono;
-                        text: Library.sortMode === "def" ? "Recently added" : Library.sortMode === "title" ? "Title A–Z" : Library.sortMode === "artist" ? "Artist A–Z" : "Longest first" }
+                    Text { id: sortLabel; anchors.centerIn: parent; color: ink; font.pixelSize: 12; font.family: mono
+                        text: Library.sortMode === "title" ? "Title A–Z" : Library.sortMode === "artist" ? "Artist A–Z"
+                            : Library.sortMode === "dur" ? "Longest first"
+                            : Library.viewKind === "album" ? "Track order" : Library.viewKind === "mix" ? "Mix order" : "Recently added" }
                     MouseArea { anchors.fill: parent; onClicked: {
                         const modes = ["def", "title", "artist", "dur"];
                         Library.sortMode = modes[(modes.indexOf(Library.sortMode) + 1) % modes.length];
                     } }
                 }
+                Rectangle {
+                    visible: Library.shownCount > 0
+                    height: 30; width: playAllLabel.implicitWidth + 26; radius: 15
+                    color: playAllHover.containsMouse ? ink : acc
+                    Text { id: playAllLabel; anchors.centerIn: parent; text: "▶ PLAY"; color: "#000"; font.pixelSize: 11; font.family: mono; font.bold: true }
+                    MouseArea { id: playAllHover; anchors.fill: parent; hoverEnabled: true; onClicked: Player.playTracks(Library.visibleTrackIds(), 0) }
+                }
             }
-            // album strip
+            // album strip (Overview only)
             ListView {
                 id: albumStrip
-                anchors { top: chips.bottom; left: parent.left; right: parent.right; topMargin: 10; leftMargin: 24; rightMargin: 24 }
-                height: count > 0 ? 208 : 0; visible: count > 0
+                anchors { top: chips.bottom; left: parent.left; right: parent.right; topMargin: visible ? 10 : 0; leftMargin: 24; rightMargin: 24 }
+                visible: page === "tracks" && !tracksOnly && Library.viewKind === "all" && count > 0
+                height: visible ? 208 : 0
                 orientation: ListView.Horizontal; spacing: 14
                 clip: true; model: Library.albums
+                delegate: AlbumCard { width: 150 }
+            }
+            // albums page
+            GridView {
+                id: albumGrid
+                anchors { top: listhead.bottom; left: parent.left; right: parent.right; bottom: parent.bottom; topMargin: 14; leftMargin: 24; rightMargin: 12 }
+                visible: page === "albums"
+                clip: true; model: Library.albums
+                readonly property int columns: Math.max(1, Math.floor(width / 170))
+                cellWidth: width / columns; cellHeight: 230
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                 delegate: Item {
-                    width: 150; height: 208
-                    Art {
-                        width: 150; height: 150
-                        source: cover; c1: model.c1; c2: model.c2
-                        accentSize: 76; accentX: (albumIndex % 3) * 34 - 8; accentY: (albumIndex % 2) * 40 - 10
-                        decodeSize: 300
-                        Row {
-                            x: 8; y: 8; spacing: 5
-                            Rectangle { height: 18; width: 40; radius: 9; color: "#00000099";
-                                Text { anchors.centerIn: parent; text: f; color: "#fff"; font.pixelSize: 9; font.family: mono } }
-                            Rectangle { height: 18; width: 52; radius: 9; color: acc; visible: hi;
-                                Text { anchors.centerIn: parent; text: "HI-RES"; color: "#101204"; font.pixelSize: 9; font.family: mono; font.bold: true } }
-                        }
-                    }
-                    Text { y: 156; width: 150; text: al; color: ink; font.pixelSize: 13; font.family: disp; elide: Text.ElideRight }
-                    Text { y: 175; width: 150; text: khz !== "" ? a + " · " + khz : a; color: mut; font.pixelSize: 12; elide: Text.ElideRight }
-                    MouseArea { anchors.fill: parent; onClicked: Player.playTracks(Library.albumTrackIds(albumIndex), 0) }
+                    width: albumGrid.cellWidth; height: albumGrid.cellHeight
+                    AlbumCard { width: Math.min(150, parent.width - 12); fromGrid: true }
+                }
+                Text {
+                    anchors { top: parent.top; left: parent.left; right: parent.right; topMargin: 40 }
+                    visible: albumGrid.count === 0; horizontalAlignment: Text.AlignHCenter
+                    text: Library.scanning ? "Scanning your music…" : "No albums yet."; color: mut; font.pixelSize: 13
                 }
             }
             // track header
@@ -320,6 +515,7 @@ ApplicationWindow {
                 id: thead
                 anchors { top: albumStrip.bottom; left: parent.left; right: parent.right; topMargin: 8; leftMargin: 24; rightMargin: 24 }
                 height: 30
+                visible: page === "tracks"
                 Rectangle { anchors { left: parent.left; right: parent.right; top: parent.top } height: 1; color: line }
                 Rectangle { anchors { left: parent.left; right: parent.right; bottom: parent.bottom } height: 1; color: line }
                 Text { x: 12; anchors.verticalCenter: parent.verticalCenter; text: "#"; color: dim; font.pixelSize: 10; font.family: mono }
@@ -331,18 +527,31 @@ ApplicationWindow {
             ListView {
                 id: trackList
                 anchors { top: thead.bottom; left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 24; rightMargin: 24 }
+                visible: page === "tracks"
                 clip: true; model: Library.tracks; spacing: 0
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                // Drag-reordering only makes sense on the unfiltered mix in its own order.
+                readonly property bool reorderable: Library.viewKind === "mix" && Library.sortMode === "def"
+                                                    && Library.query === "" && Library.format === "All"
+                property int dragFrom: -1
+                property int dropAt: -1
                 delegate: Rectangle {
+                    id: trackRow
                     width: trackList.width; height: 56; radius: 9
                     readonly property bool isCur: ti === Player.currentId
-                    color: isCur ? "#151a0e" : rowHover.containsMouse ? "#141419" : "transparent"
+                    readonly property bool hovered: rowHover.containsMouse || quickHover.hovered || handleArea.containsMouse
+                    color: isCur ? "#151a0e" : hovered ? "#141419" : "transparent"
+                    border.color: trackList.dropAt === index && trackList.dragFrom !== index ? acc : "transparent"
+                    border.width: 1
+                    opacity: trackList.dragFrom === index ? 0.5 : 1
                     Row {
                         anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
                         spacing: 10
-                        Text { anchors.verticalCenter: parent.verticalCenter; width: 22;
-                            text: isCur ? (Player.playing ? "‖" : "▶") : String(index + 1).padStart(2, "0");
-                            color: isCur ? acc : dim; font.pixelSize: 12; font.family: mono }
+                        Text { anchors.verticalCenter: parent.verticalCenter; width: 22
+                            text: trackList.reorderable && (trackRow.hovered || handleArea.pressed) ? "⋮⋮"
+                                : isCur ? (Player.playing ? "‖" : "▶") : String(index + 1).padStart(2, "0")
+                            color: isCur ? acc : trackList.reorderable && trackRow.hovered ? ink : dim
+                            font.pixelSize: 12; font.family: mono }
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
                             width: mid ? parent.width - 170 : parent.width - 340
@@ -362,19 +571,45 @@ ApplicationWindow {
                         anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.LeftButton
                         onClicked: Player.playTracks(Library.visibleTrackIds(), index)
                     }
+                    // mix reorder handle (over the number column)
+                    MouseArea {
+                        id: handleArea
+                        x: 6; width: 34; height: parent.height
+                        enabled: trackList.reorderable; hoverEnabled: true
+                        cursorShape: enabled ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor) : Qt.ArrowCursor
+                        preventStealing: true
+                        onPressed: { trackList.dragFrom = index; trackList.dropAt = index; }
+                        onPositionChanged: mouse => {
+                            if (!pressed) return;
+                            const p = mapToItem(trackList.contentItem, mouse.x, mouse.y);
+                            const at = trackList.indexAt(trackList.width / 2, p.y);
+                            if (at >= 0) trackList.dropAt = at;
+                            else trackList.dropAt = p.y < 0 ? 0 : trackList.count - 1;
+                        }
+                        onReleased: {
+                            const from = trackList.dragFrom, to = trackList.dropAt;
+                            trackList.dragFrom = -1; trackList.dropAt = -1;
+                            if (from >= 0 && to >= 0 && from !== to) Library.moveInMix(Library.viewMixId, from, to);
+                        }
+                        onCanceled: { trackList.dragFrom = -1; trackList.dropAt = -1; }
+                    }
                     // hover quick actions (above rowHover so they get the clicks)
                     Row {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 44 }
-                        spacing: 6; visible: rowHover.containsMouse || quickHover.hovered
+                        spacing: 6; visible: trackRow.hovered && trackList.dragFrom < 0
                         HoverHandler { id: quickHover }
                         Repeater {
-                            model: [{t: "NEXT UP", a: "next"}, {t: "+ QUEUE", a: "end"}]
+                            model: Library.viewKind === "mix"
+                                   ? [{t: "NEXT UP", a: "next"}, {t: "+ QUEUE", a: "end"}, {t: "+ MIX", a: "mix"}, {t: "REMOVE", a: "remove"}]
+                                   : [{t: "NEXT UP", a: "next"}, {t: "+ QUEUE", a: "end"}, {t: "+ MIX", a: "mix"}]
                             Rectangle {
                                 height: 24; width: 64; radius: 7; color: "#22222a"; border.color: line2; border.width: 1
-                                Text { anchors.centerIn: parent; text: modelData.t; color: ink; font.pixelSize: 10; font.family: mono }
+                                Text { anchors.centerIn: parent; text: modelData.t; color: modelData.a === "remove" ? "#ff8a7a" : ink; font.pixelSize: 10; font.family: mono }
                                 MouseArea { anchors.fill: parent; onClicked: {
                                     if (modelData.a === "next") Player.playNext(ti);
-                                    else Player.enqueue(ti);
+                                    else if (modelData.a === "end") Player.enqueue(ti);
+                                    else if (modelData.a === "mix") { mixMenu.trackId = ti; mixMenu.popup(); }
+                                    else Library.removeFromMix(Library.viewMixId, slot);
                                 } }
                             }
                         }
@@ -385,16 +620,19 @@ ApplicationWindow {
                     anchors { top: parent.top; left: parent.left; right: parent.right; topMargin: 40 }
                     spacing: 8
                     visible: trackList.count === 0
+                    readonly property bool emptyMix: Library.viewKind === "mix" && Library.query === "" && Library.format === "All"
                     Text {
                         width: parent.width; horizontalAlignment: Text.AlignHCenter
                         color: ink; font.pixelSize: 15; font.family: disp
-                        text: Library.totalCount > 0 ? "Nothing matches"
+                        text: parent.emptyMix ? "This mix is empty"
+                            : Library.totalCount > 0 ? "Nothing matches"
                             : Library.scanning ? "Scanning your music…" : "No music found"
                     }
                     Text {
                         width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
                         color: mut; font.pixelSize: 12
-                        text: Library.totalCount > 0 ? "Try another search or filter."
+                        text: parent.emptyMix ? "Hover any track and use + MIX to add it here."
+                            : Library.totalCount > 0 ? "Try another search or filter."
                             : Library.error !== "" ? Library.error
                             : "Flow reads FLAC, MP3 and WAV from " + Library.musicDir
                               + ".\nStart it with --library=/path/to/music to use another folder."

@@ -18,23 +18,30 @@ class QJSEngine;
 class QQmlEngine;
 class Library;
 
-// Filtered + sorted view over the library, one row per track.
+// Filtered + sorted view over the current source (all / album / mix).
 class TrackListModel : public QAbstractListModel
 {
     Q_OBJECT
 public:
+    enum Role { Slot = TrackRoles::Last + 1 };
+
+    struct Row {
+        int track;      // index into Library::tracks()
+        int slot = -1;  // position in the mix when viewing one, else -1
+    };
+
     explicit TrackListModel(Library *library);
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
-    void setRows(QList<int> rows);                // indices into Library::tracks()
-    const QList<int> &rows() const { return m_rows; }
+    void setRows(QList<Row> rows);
+    const QList<Row> &rows() const { return m_rows; }
     void trackChanged(int trackIndex);
 
 private:
     Library *m_library;
-    QList<int> m_rows;
+    QList<Row> m_rows;
 };
 
 // One row per album, carrying the roles of its first track plus `count`.
@@ -45,6 +52,7 @@ public:
     enum Role { TrackCount = TrackRoles::Last + 1, AlbumIndex };
 
     struct Album {
+        QString key;         // TrackFormat::albumKey
         QList<int> tracks;   // indices into Library::tracks(), in play order
     };
 
@@ -61,6 +69,28 @@ private:
     QList<Album> m_albums;
 };
 
+// The user's mixes (playlists), in creation order.
+class MixListModel : public QAbstractListModel
+{
+    Q_OBJECT
+public:
+    enum Role { MixId = Qt::UserRole + 1, Name, TrackCount };
+
+    explicit MixListModel(Library *library);
+    int rowCount(const QModelIndex &parent = {}) const override;
+    QVariant data(const QModelIndex &index, int role) const override;
+    QHash<int, QByteArray> roleNames() const override;
+
+    void reset(QList<LibraryDb::Playlist> mixes);
+    void changed(int row);
+    QList<LibraryDb::Playlist> &mixes() { return m_mixes; }
+    const QList<LibraryDb::Playlist> &mixes() const { return m_mixes; }
+    int rowOf(qint64 id) const;
+
+private:
+    QList<LibraryDb::Playlist> m_mixes;
+};
+
 class Library : public QObject
 {
     Q_OBJECT
@@ -69,6 +99,11 @@ class Library : public QObject
 
     Q_PROPERTY(QAbstractItemModel *tracks READ trackModel CONSTANT)
     Q_PROPERTY(QAbstractItemModel *albums READ albumModel CONSTANT)
+    Q_PROPERTY(QAbstractItemModel *mixes READ mixModel CONSTANT)
+    Q_PROPERTY(QString viewKind READ viewKind NOTIFY viewChanged)      // all | album | mix
+    Q_PROPERTY(QString viewTitle READ viewTitle NOTIFY viewChanged)
+    Q_PROPERTY(QString viewSubtitle READ viewSubtitle NOTIFY viewChanged)
+    Q_PROPERTY(qint64 viewMixId READ viewMixId NOTIFY viewChanged)
     Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged)
     Q_PROPERTY(QString format READ format WRITE setFormat NOTIFY formatChanged)
     Q_PROPERTY(QString sortMode READ sortMode WRITE setSortMode NOTIFY sortModeChanged)
@@ -93,6 +128,11 @@ public:
 
     QAbstractItemModel *trackModel() { return &m_trackModel; }
     QAbstractItemModel *albumModel() { return &m_albumModel; }
+    QAbstractItemModel *mixModel() { return &m_mixModel; }
+    QString viewKind() const { return m_viewKind; }
+    QString viewTitle() const;
+    QString viewSubtitle() const;
+    qint64 viewMixId() const { return m_viewKind == u"mix" ? m_viewMixId : -1; }
     QString query() const { return m_query; }
     void setQuery(const QString &query);
     QString format() const { return m_format; }
@@ -118,6 +158,19 @@ public:
     Q_INVOKABLE QVariantList visibleTrackIds() const;       // current filter/sort order
     Q_INVOKABLE QVariantList albumTrackIds(int albumRow) const;
 
+    // Which tracks the list shows; filters and sort apply on top.
+    Q_INVOKABLE void showAll();
+    Q_INVOKABLE void showAlbum(int albumRow);
+    Q_INVOKABLE void showMix(qint64 mixId);
+
+    Q_INVOKABLE qint64 createMix(const QString &name);   // -1 on failure
+    Q_INVOKABLE void renameMix(qint64 mixId, const QString &name);
+    Q_INVOKABLE void deleteMix(qint64 mixId);
+    Q_INVOKABLE void addToMix(qint64 mixId, qint64 trackId);
+    Q_INVOKABLE void removeFromMix(qint64 mixId, int slot);
+    Q_INVOKABLE void moveInMix(qint64 mixId, int fromSlot, int toSlot);
+    Q_INVOKABLE QVariantList mixTrackIds(qint64 mixId) const;
+
 signals:
     void queryChanged();
     void formatChanged();
@@ -128,6 +181,7 @@ signals:
     void errorChanged();
     void trackUpdated(qint64 id);   // metadata or liked changed
     void reloaded();                // whole library reloaded from the database
+    void viewChanged();
 
 private:
     void reload();
@@ -135,6 +189,10 @@ private:
     void rebuildAlbums();
     void updateStorage();
     void setError(const QString &error);
+    void reloadMixes();
+    bool saveMix(int row);
+    const AlbumListModel::Album *viewedAlbum() const;
+    void setView(const QString &kind, const QString &albumKey, qint64 mixId);
     void onScanFinished(bool ok, const QString &error, const QStringList &dirs, bool changed);
 
     static inline Library *s_instance = nullptr;
@@ -150,6 +208,11 @@ private:
     int m_likedCount = 0;
     TrackListModel m_trackModel;
     AlbumListModel m_albumModel;
+    MixListModel m_mixModel;
+
+    QString m_viewKind = QStringLiteral("all");
+    QString m_viewAlbumKey;       // stable across rescans, unlike the row
+    qint64 m_viewMixId = -1;
 
     QString m_query;
     QString m_format = QStringLiteral("All");

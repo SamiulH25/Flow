@@ -8,7 +8,7 @@
 #include <QSqlQuery>
 
 namespace {
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 QAtomicInt s_connectionCounter;
 
 // A null QString binds as SQL NULL; the text columns are NOT NULL.
@@ -55,8 +55,10 @@ bool LibraryDb::open(const QString &path)
         return false;
     }
     // WAL lets the GUI read (and toggle likes) while the scanner writes.
+    // foreign_keys makes pruned tracks drop out of playlists.
     return exec(QStringLiteral("PRAGMA journal_mode=WAL"))
         && exec(QStringLiteral("PRAGMA synchronous=NORMAL"))
+        && exec(QStringLiteral("PRAGMA foreign_keys=ON"))
         && migrate();
 }
 
@@ -86,7 +88,9 @@ bool LibraryDb::migrate()
     }
     if (!transaction())
         return false;
-    const bool ok = exec(QStringLiteral(
+    bool ok = true;
+    if (version < 1) {
+        ok = exec(QStringLiteral(
                "CREATE TABLE IF NOT EXISTS tracks ("
                " id INTEGER PRIMARY KEY,"
                " path TEXT NOT NULL UNIQUE,"
@@ -107,9 +111,24 @@ bool LibraryDb::migrate()
                " channels INTEGER NOT NULL DEFAULT 0,"
                " cover TEXT NOT NULL DEFAULT '',"
                " liked INTEGER NOT NULL DEFAULT 0,"
-               " added_at INTEGER NOT NULL DEFAULT 0)"))
-        && exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion))
-        && commit();
+               " added_at INTEGER NOT NULL DEFAULT 0)"));
+    }
+    if (ok && version < 2) {
+        ok = exec(QStringLiteral(
+                 "CREATE TABLE IF NOT EXISTS playlists ("
+                 " id INTEGER PRIMARY KEY,"
+                 " name TEXT NOT NULL,"
+                 " created_at INTEGER NOT NULL DEFAULT 0)"))
+            && exec(QStringLiteral(
+                 "CREATE TABLE IF NOT EXISTS playlist_tracks ("
+                 " playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,"
+                 " position INTEGER NOT NULL,"
+                 " track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE)"))
+            && exec(QStringLiteral(
+                 "CREATE INDEX IF NOT EXISTS playlist_tracks_by_list"
+                 " ON playlist_tracks (playlist_id, position)"));
+    }
+    ok = ok && exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion)) && commit();
     if (!ok)
         db().rollback();
     return ok;
@@ -233,6 +252,98 @@ bool LibraryDb::setLiked(qint64 id, bool liked)
         return false;
     }
     return true;
+}
+
+QList<LibraryDb::Playlist> LibraryDb::playlists()
+{
+    QList<Playlist> out;
+    QHash<qint64, qsizetype> byId;
+    QSqlQuery q(db());
+    q.setForwardOnly(true);
+    if (!q.exec(QStringLiteral("SELECT id, name FROM playlists ORDER BY created_at, id"))) {
+        m_error = q.lastError().text();
+        return out;
+    }
+    while (q.next()) {
+        byId.insert(q.value(0).toLongLong(), out.size());
+        out.append({q.value(0).toLongLong(), q.value(1).toString(), {}});
+    }
+    if (!q.exec(QStringLiteral(
+            "SELECT playlist_id, track_id FROM playlist_tracks ORDER BY playlist_id, position"))) {
+        m_error = q.lastError().text();
+        return out;
+    }
+    while (q.next()) {
+        const auto it = byId.constFind(q.value(0).toLongLong());
+        if (it != byId.cend())
+            out[*it].trackIds.append(q.value(1).toLongLong());
+    }
+    return out;
+}
+
+qint64 LibraryDb::createPlaylist(const QString &name)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("INSERT INTO playlists (name, created_at) VALUES (?, ?)"));
+    q.addBindValue(text(name));
+    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
+    if (!q.exec()) {
+        m_error = q.lastError().text();
+        return -1;
+    }
+    return q.lastInsertId().toLongLong();
+}
+
+bool LibraryDb::renamePlaylist(qint64 id, const QString &name)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("UPDATE playlists SET name = ? WHERE id = ?"));
+    q.addBindValue(text(name));
+    q.addBindValue(id);
+    if (!q.exec()) {
+        m_error = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool LibraryDb::deletePlaylist(qint64 id)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("DELETE FROM playlists WHERE id = ?"));   // entries cascade
+    q.addBindValue(id);
+    if (!q.exec()) {
+        m_error = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool LibraryDb::setPlaylistTracks(qint64 id, const QList<qint64> &trackIds)
+{
+    // Playlists are small; rewriting keeps positions dense and simple.
+    if (!transaction())
+        return false;
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("DELETE FROM playlist_tracks WHERE playlist_id = ?"));
+    q.addBindValue(id);
+    bool ok = q.exec();
+    if (ok) {
+        q.prepare(QStringLiteral(
+            "INSERT INTO playlist_tracks (playlist_id, position, track_id) VALUES (?, ?, ?)"));
+        for (int i = 0; ok && i < trackIds.size(); ++i) {
+            q.addBindValue(id);
+            q.addBindValue(i);
+            q.addBindValue(trackIds.at(i));
+            ok = q.exec();
+        }
+    }
+    if (!ok) {
+        m_error = q.lastError().text();
+        db().rollback();
+        return false;
+    }
+    return commit();
 }
 
 bool LibraryDb::transaction()

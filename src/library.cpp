@@ -28,15 +28,20 @@ QVariant TrackListModel::data(const QModelIndex &index, int role) const
 {
     if (!checkIndex(index, CheckIndexOption::IndexIsValid | CheckIndexOption::ParentIsInvalid))
         return {};
-    return TrackRoles::value(m_library->tracks().at(m_rows.at(index.row())), role);
+    const Row &row = m_rows.at(index.row());
+    if (role == Slot)
+        return row.slot;
+    return TrackRoles::value(m_library->tracks().at(row.track), role);
 }
 
 QHash<int, QByteArray> TrackListModel::roleNames() const
 {
-    return TrackRoles::names();
+    QHash<int, QByteArray> roles = TrackRoles::names();
+    roles.insert(Slot, "slot");
+    return roles;
 }
 
-void TrackListModel::setRows(QList<int> rows)
+void TrackListModel::setRows(QList<Row> rows)
 {
     beginResetModel();
     m_rows = std::move(rows);
@@ -45,9 +50,11 @@ void TrackListModel::setRows(QList<int> rows)
 
 void TrackListModel::trackChanged(int trackIndex)
 {
-    const qsizetype row = m_rows.indexOf(trackIndex);
-    if (row >= 0)
-        emit dataChanged(index(int(row)), index(int(row)));
+    // A mix may list the same track more than once.
+    for (int i = 0; i < m_rows.size(); ++i) {
+        if (m_rows.at(i).track == trackIndex)
+            emit dataChanged(index(i), index(i));
+    }
 }
 
 // ---------------------------------------------------------------- AlbumListModel
@@ -102,6 +109,57 @@ void AlbumListModel::setAlbums(QList<Album> albums)
     endResetModel();
 }
 
+// ---------------------------------------------------------------- MixListModel
+
+MixListModel::MixListModel(Library *library)
+    : QAbstractListModel(library)
+{
+}
+
+int MixListModel::rowCount(const QModelIndex &parent) const
+{
+    return parent.isValid() ? 0 : int(m_mixes.size());
+}
+
+QVariant MixListModel::data(const QModelIndex &index, int role) const
+{
+    if (!checkIndex(index, CheckIndexOption::IndexIsValid | CheckIndexOption::ParentIsInvalid))
+        return {};
+    const LibraryDb::Playlist &mix = m_mixes.at(index.row());
+    switch (role) {
+    case MixId: return mix.id;
+    case Name: return mix.name;
+    case TrackCount: return int(mix.trackIds.size());
+    }
+    return {};
+}
+
+QHash<int, QByteArray> MixListModel::roleNames() const
+{
+    return {{MixId, "mixId"}, {Name, "name"}, {TrackCount, "count"}};
+}
+
+void MixListModel::reset(QList<LibraryDb::Playlist> mixes)
+{
+    beginResetModel();
+    m_mixes = std::move(mixes);
+    endResetModel();
+}
+
+void MixListModel::changed(int row)
+{
+    emit dataChanged(index(row), index(row));
+}
+
+int MixListModel::rowOf(qint64 id) const
+{
+    for (int i = 0; i < m_mixes.size(); ++i) {
+        if (m_mixes.at(i).id == id)
+            return i;
+    }
+    return -1;
+}
+
 // ---------------------------------------------------------------- Library
 
 Library::Library(const QString &musicDir, const QString &dbPath, const QString &coverDir,
@@ -112,6 +170,7 @@ Library::Library(const QString &musicDir, const QString &dbPath, const QString &
     , m_coverDir(coverDir)
     , m_trackModel(this)
     , m_albumModel(this)
+    , m_mixModel(this)
 {
     m_rescanDebounce.setSingleShot(true);
     m_rescanDebounce.setInterval(2000);   // coalesce bursts (copying an album in)
@@ -224,19 +283,45 @@ void Library::reload()
     m_albumAddedAt.reserve(m_tracks.size());
     for (const Track &t : std::as_const(m_tracks))
         m_albumAddedAt.append(albumAdded.value(TrackFormat::albumKey(t)));
-    applyFilter();
     rebuildAlbums();
+    reloadMixes();   // pruned tracks have left their mixes (FK cascade)
+    // Fall back to everything when the viewed album or mix is gone.
+    if ((m_viewKind == u"album" && !viewedAlbum())
+        || (m_viewKind == u"mix" && m_mixModel.rowOf(m_viewMixId) < 0))
+        setView(QStringLiteral("all"), {}, -1);
+    applyFilter();
     updateStorage();
     emit reloaded();
+    emit viewChanged();
 }
 
 void Library::applyFilter()
 {
+    QList<TrackListModel::Row> source;
+    if (m_viewKind == u"album") {
+        if (const AlbumListModel::Album *album = viewedAlbum()) {
+            for (int i : album->tracks)
+                source.append(TrackListModel::Row{i});
+        }
+    } else if (m_viewKind == u"mix") {
+        const int row = m_mixModel.rowOf(m_viewMixId);
+        const QList<qint64> ids = row >= 0 ? m_mixModel.mixes().at(row).trackIds : QList<qint64>();
+        for (int slot = 0; slot < ids.size(); ++slot) {
+            const auto it = m_indexById.constFind(ids.at(slot));
+            if (it != m_indexById.cend())
+                source.append(TrackListModel::Row{*it, slot});
+        }
+    } else {
+        source.reserve(m_tracks.size());
+        for (int i = 0; i < m_tracks.size(); ++i)
+            source.append(TrackListModel::Row{i});
+    }
+
     const QStringList words = m_query.split(u' ', Qt::SkipEmptyParts);
-    QList<int> rows;
-    rows.reserve(m_tracks.size());
-    for (int i = 0; i < m_tracks.size(); ++i) {
-        const Track &t = m_tracks.at(i);
+    QList<TrackListModel::Row> rows;
+    rows.reserve(source.size());
+    for (const TrackListModel::Row &r : std::as_const(source)) {
+        const Track &t = m_tracks.at(r.track);
         if (m_format == u"Liked") {
             if (!t.liked)
                 continue;
@@ -253,7 +338,7 @@ void Library::applyFilter()
             }
         }
         if (match)
-            rows.append(i);
+            rows.append(r);
     }
 
     QCollator coll;
@@ -272,8 +357,17 @@ void Library::applyFilter()
             return a.trackNo < b.trackNo;
         return coll.compare(a.title, b.title) < 0;
     };
+    // Albums and mixes have their own natural order for "def".
+    if (m_sortMode == u"def" && m_viewKind != u"all") {
+        m_trackModel.setRows(std::move(rows));
+        emit countsChanged();
+        return;
+    }
     const auto &all = m_tracks;
-    std::stable_sort(rows.begin(), rows.end(), [&](int ia, int ib) {
+    std::stable_sort(rows.begin(), rows.end(), [&](const TrackListModel::Row &ra,
+                                                   const TrackListModel::Row &rb) {
+        const int ia = ra.track;
+        const int ib = rb.track;
         const Track &a = all.at(ia);
         const Track &b = all.at(ib);
         if (m_sortMode == u"title") {
@@ -309,6 +403,7 @@ void Library::rebuildAlbums()
             it = byKey.insert(key, int(albums.size()));
             albums.append(AlbumListModel::Album{});
         }
+        albums[*it].key = key;
         albums[*it].tracks.append(i);
     }
 
@@ -461,8 +556,8 @@ void Library::toggleLike(qint64 id)
 QVariantList Library::visibleTrackIds() const
 {
     QVariantList ids;
-    for (int i : m_trackModel.rows())
-        ids.append(m_tracks.at(i).id);
+    for (const TrackListModel::Row &r : m_trackModel.rows())
+        ids.append(m_tracks.at(r.track).id);
     return ids;
 }
 
@@ -475,4 +570,185 @@ QVariantList Library::albumTrackIds(int albumRow) const
     for (int i : albums.at(albumRow).tracks)
         ids.append(m_tracks.at(i).id);
     return ids;
+}
+
+// ---------------------------------------------------------------- views
+
+const AlbumListModel::Album *Library::viewedAlbum() const
+{
+    for (const auto &album : m_albumModel.albums()) {
+        if (album.key == m_viewAlbumKey)
+            return &album;
+    }
+    return nullptr;
+}
+
+void Library::setView(const QString &kind, const QString &albumKey, qint64 mixId)
+{
+    m_viewKind = kind;
+    m_viewAlbumKey = albumKey;
+    m_viewMixId = mixId;
+}
+
+QString Library::viewTitle() const
+{
+    if (m_viewKind == u"album") {
+        if (const auto *album = viewedAlbum())
+            return m_tracks.at(album->tracks.first()).album;
+    } else if (m_viewKind == u"mix") {
+        const int row = m_mixModel.rowOf(m_viewMixId);
+        if (row >= 0)
+            return m_mixModel.mixes().at(row).name;
+    }
+    return QStringLiteral("Collection");
+}
+
+QString Library::viewSubtitle() const
+{
+    if (m_viewKind == u"album") {
+        if (const auto *album = viewedAlbum()) {
+            const Track &t = m_tracks.at(album->tracks.first());
+            const QString artist = t.albumArtist.isEmpty() ? t.artist : t.albumArtist;
+            return t.year > 0 ? artist + QStringLiteral(" · ") + QString::number(t.year) : artist;
+        }
+    } else if (m_viewKind == u"mix") {
+        return QStringLiteral("Mix");
+    }
+    return {};
+}
+
+void Library::showAll()
+{
+    setView(QStringLiteral("all"), {}, -1);
+    applyFilter();
+    emit viewChanged();
+}
+
+void Library::showAlbum(int albumRow)
+{
+    const auto &albums = m_albumModel.albums();
+    if (albumRow < 0 || albumRow >= albums.size())
+        return;
+    setView(QStringLiteral("album"), albums.at(albumRow).key, -1);
+    applyFilter();
+    emit viewChanged();
+}
+
+void Library::showMix(qint64 mixId)
+{
+    if (m_mixModel.rowOf(mixId) < 0)
+        return;
+    setView(QStringLiteral("mix"), {}, mixId);
+    applyFilter();
+    emit viewChanged();
+}
+
+// ---------------------------------------------------------------- mixes
+
+void Library::reloadMixes()
+{
+    m_mixModel.reset(m_db.isOpen() ? m_db.playlists() : QList<LibraryDb::Playlist>());
+}
+
+bool Library::saveMix(int row)
+{
+    const LibraryDb::Playlist &mix = m_mixModel.mixes().at(row);
+    if (!m_db.setPlaylistTracks(mix.id, mix.trackIds)) {
+        setError(QStringLiteral("Could not save mix: ") + m_db.lastError());
+        reloadMixes();   // back to what the database has
+        applyFilter();
+        return false;
+    }
+    m_mixModel.changed(row);
+    if (m_viewKind == u"mix" && m_viewMixId == mix.id)
+        applyFilter();
+    return true;
+}
+
+qint64 Library::createMix(const QString &name)
+{
+    const QString clean = name.trimmed().isEmpty() ? QStringLiteral("New mix") : name.trimmed();
+    const qint64 id = m_db.createPlaylist(clean);
+    if (id < 0) {
+        setError(QStringLiteral("Could not create mix: ") + m_db.lastError());
+        return -1;
+    }
+    reloadMixes();
+    return id;
+}
+
+void Library::renameMix(qint64 mixId, const QString &name)
+{
+    const int row = m_mixModel.rowOf(mixId);
+    const QString clean = name.trimmed();
+    if (row < 0 || clean.isEmpty())
+        return;
+    if (!m_db.renamePlaylist(mixId, clean)) {
+        setError(QStringLiteral("Could not rename mix: ") + m_db.lastError());
+        return;
+    }
+    m_mixModel.mixes()[row].name = clean;
+    m_mixModel.changed(row);
+    if (m_viewKind == u"mix" && m_viewMixId == mixId)
+        emit viewChanged();
+}
+
+void Library::deleteMix(qint64 mixId)
+{
+    if (m_mixModel.rowOf(mixId) < 0)
+        return;
+    if (!m_db.deletePlaylist(mixId)) {
+        setError(QStringLiteral("Could not delete mix: ") + m_db.lastError());
+        return;
+    }
+    reloadMixes();
+    if (m_viewKind == u"mix" && m_viewMixId == mixId)
+        showAll();
+}
+
+void Library::addToMix(qint64 mixId, qint64 trackId)
+{
+    const int row = m_mixModel.rowOf(mixId);
+    if (row < 0 || !m_indexById.contains(trackId))
+        return;
+    m_mixModel.mixes()[row].trackIds.append(trackId);
+    saveMix(row);
+}
+
+void Library::removeFromMix(qint64 mixId, int slot)
+{
+    const int row = m_mixModel.rowOf(mixId);
+    if (row < 0)
+        return;
+    QList<qint64> &ids = m_mixModel.mixes()[row].trackIds;
+    if (slot < 0 || slot >= ids.size())
+        return;
+    ids.removeAt(slot);
+    saveMix(row);
+}
+
+void Library::moveInMix(qint64 mixId, int fromSlot, int toSlot)
+{
+    const int row = m_mixModel.rowOf(mixId);
+    if (row < 0)
+        return;
+    QList<qint64> &ids = m_mixModel.mixes()[row].trackIds;
+    if (fromSlot < 0 || fromSlot >= ids.size() || toSlot < 0 || toSlot >= ids.size()
+        || fromSlot == toSlot)
+        return;
+    ids.move(fromSlot, toSlot);
+    saveMix(row);
+}
+
+QVariantList Library::mixTrackIds(qint64 mixId) const
+{
+    QVariantList out;
+    const int row = m_mixModel.rowOf(mixId);
+    if (row < 0)
+        return out;
+    for (qint64 id : m_mixModel.mixes().at(row).trackIds) {
+        if (m_indexById.contains(id))
+            out.append(id);
+    }
+    return out;
 }

@@ -54,6 +54,10 @@ if(FLOW_BUILD_TESTS)
         add_test(NAME ${name} COMMAND ${name})
     endforeach()
 
+    qt_add_executable(tst_library tests/tst_library.cpp src/library.h src/library.cpp)
+    target_link_libraries(tst_library PRIVATE flowcore Qt6::Qml Qt6::Test)
+    add_test(NAME tst_library COMMAND tst_library)
+
     # Integration: real scan + QMediaPlayer playback (plays a few seconds of silence).
     qt_add_executable(tst_player tests/tst_player.cpp
         src/library.h src/library.cpp src/player.h src/player.cpp)

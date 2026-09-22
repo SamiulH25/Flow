@@ -18,6 +18,12 @@ public:
         qint64 size = 0;
     };
 
+    struct Playlist {
+        qint64 id = -1;
+        QString name;
+        QList<qint64> trackIds;   // in play order; may repeat
+    };
+
     LibraryDb();
     ~LibraryDb();
     LibraryDb(const LibraryDb &) = delete;
@@ -32,6 +38,12 @@ public:
     bool upsert(const Track &t);      // keeps id, liked and added_at of existing rows
     bool remove(const QString &path);
     bool setLiked(qint64 id, bool liked);
+
+    QList<Playlist> playlists();
+    qint64 createPlaylist(const QString &name);   // -1 on failure
+    bool renamePlaylist(qint64 id, const QString &name);
+    bool deletePlaylist(qint64 id);
+    bool setPlaylistTracks(qint64 id, const QList<qint64> &trackIds);
 
     bool transaction();
     bool commit();
