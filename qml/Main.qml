@@ -31,6 +31,7 @@ ApplicationWindow {
     // ---- responsive tiers (mirror ui-demo.html stress test) ----
     readonly property bool mid: root.width < 1080
     readonly property bool narrow: root.width < 820
+    onNarrowChanged: if (!narrow) railOpen = false
 
     // ---- view state (playback + library state live in C++) ----
     readonly property var cur: Player.current
@@ -39,6 +40,7 @@ ApplicationWindow {
     property string page: "tracks"   // tracks | albums (album/mix detail = tracks + Library view)
     property bool tracksOnly: false   // "Tracks" hides the album strip that "Overview" shows
     property bool albumsFromGrid: false  // where "← BACK" from an album returns to
+    property bool railOpen: false        // narrow windows: rail shown as an overlay
     property bool drawerOpen: true
 
     function fmtTime(s) {
@@ -46,6 +48,7 @@ ApplicationWindow {
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
     }
     function goTo(k) {
+        railOpen = false;
         if (k === "albums") { page = "albums"; return; }
         page = "tracks";
         tracksOnly = k === "tracks";
@@ -59,7 +62,7 @@ ApplicationWindow {
     Shortcut { sequence: "Space"; onActivated: Player.toggle() }
     Shortcut { sequence: "Right"; onActivated: Player.next() }
     Shortcut { sequence: "Left"; onActivated: Player.previous() }
-    Shortcut { sequence: "Escape"; onActivated: { drawerOpen = false; searchField.focus = false; } }
+    Shortcut { sequence: "Escape"; onActivated: { drawerOpen = false; railOpen = false; searchField.focus = false; } }
     Shortcut { sequence: "Ctrl+K"; onActivated: searchField.forceActiveFocus() }
 
     // Cover art with the placeholder gradient underneath (shown until/unless art loads).
@@ -200,7 +203,17 @@ ApplicationWindow {
         Row {
             anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 16 }
             spacing: 7
+            visible: !narrow
             Repeater { model: 3; Rectangle { width: 11; height: 11; radius: 5.5; color: "#2c2c34" } }
+        }
+        // narrow windows hide the rail; this opens it as an overlay
+        Rectangle {
+            anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 12 }
+            width: 34; height: 34; radius: 9; visible: narrow
+            color: railOpen || menuHover.containsMouse ? "#1e1e25" : "transparent"
+            border.color: line2; border.width: 1
+            Text { anchors.centerIn: parent; text: "☰"; color: ink; font.pixelSize: 15 }
+            MouseArea { id: menuHover; anchors.fill: parent; hoverEnabled: true; onClicked: railOpen = !railOpen }
         }
         Text {
             anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 62 }
@@ -253,11 +266,19 @@ ApplicationWindow {
             MouseArea { anchors.fill: parent; onClicked: drawerOpen = false }
         }
 
+        // scrim for the overlay rail (narrow windows)
+        Rectangle {
+            anchors.fill: parent; color: "black"; opacity: 0.45; z: 11
+            visible: narrow && railOpen
+            MouseArea { anchors.fill: parent; onClicked: railOpen = false }
+        }
+
         // ---- rail ----
         Rectangle {
             id: rail
             anchors { top: parent.top; left: parent.left; bottom: parent.bottom }
-            width: 224; color: bg; visible: !narrow
+            width: 224; color: bg; visible: !narrow || railOpen
+            z: narrow ? 12 : 0
             Rectangle { anchors { top: parent.top; right: parent.right; bottom: parent.bottom } width: 1; color: line }
             Flickable {
                 anchors { fill: parent; margins: 12 }
@@ -303,7 +324,7 @@ ApplicationWindow {
                         MouseArea {
                             id: mixHover
                             anchors.fill: parent; hoverEnabled: true
-                            onClicked: { page = "tracks"; Library.showMix(mixId); }
+                            onClicked: { page = "tracks"; railOpen = false; Library.showMix(mixId); }
                             onDoubleClicked: mixRow.renaming = true
                             onExited: mixRow.confirmDelete = false
                         }
@@ -354,7 +375,7 @@ ApplicationWindow {
                         anchors.fill: parent; hoverEnabled: true
                         onClicked: {
                             const id = Library.createMix(nextMixName());
-                            if (id >= 0) { page = "tracks"; Library.showMix(id); }
+                            if (id >= 0) { page = "tracks"; railOpen = false; Library.showMix(id); }
                         }
                     }
                 }
@@ -429,11 +450,20 @@ ApplicationWindow {
                     }
                 }
             }
-            Row {
+            // Scrolls sideways when the chips don't fit (narrow tiles).
+            Flickable {
                 id: chips
                 anchors { top: listhead.bottom; left: parent.left; right: parent.right; topMargin: 6; leftMargin: 24; rightMargin: 24 }
-                height: 36; spacing: 8
+                height: 36
                 visible: page === "tracks"
+                contentWidth: chipRow.implicitWidth; contentHeight: height
+                flickableDirection: Flickable.HorizontalFlick
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: contentWidth > width
+                clip: interactive
+            Row {
+                id: chipRow
+                height: 36; spacing: 8
                 Repeater {
                     model: ["All", "FLAC", "MP3", "WAV", "Liked"]
                     Rectangle {
@@ -470,6 +500,7 @@ ApplicationWindow {
                     Text { id: playAllLabel; anchors.centerIn: parent; text: "▶ PLAY"; color: "#000"; font.pixelSize: 11; font.family: mono; font.bold: true }
                     MouseArea { id: playAllHover; anchors.fill: parent; hoverEnabled: true; onClicked: Player.playTracks(Library.visibleTrackIds(), 0) }
                 }
+            }
             }
             // album strip (Overview only)
             ListView {
@@ -865,9 +896,12 @@ ApplicationWindow {
                 source: cur.cover; c1: cur.c1; c2: cur.c2; accent: false; decodeSize: 96
             }
             Column {
+                // Whatever room is left of the centred transport (art, gaps, heart ≈ 125px).
+                readonly property real room: Math.min(200, dock.width / 2 - transport.width / 2 - 125)
                 anchors.verticalCenter: parent.verticalCenter
-                Text { text: Player.hasTrack ? cur.t : "Nothing playing"; color: ink; font.pixelSize: 13; font.family: disp; elide: Text.ElideRight; width: Math.min(200, dock.width * 0.2) }
-                Text { text: cur.a; color: mut; font.pixelSize: 12; visible: root.width > 640; elide: Text.ElideRight; width: Math.min(200, dock.width * 0.2) }
+                visible: room >= 40
+                Text { text: Player.hasTrack ? cur.t : "Nothing playing"; color: ink; font.pixelSize: 13; font.family: disp; elide: Text.ElideRight; width: parent.room }
+                Text { text: cur.a; color: mut; font.pixelSize: 12; elide: Text.ElideRight; width: parent.room }
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter; text: cur.liked ? "♥" : "♡"
@@ -878,6 +912,7 @@ ApplicationWindow {
         }
         // center: transport
         Row {
+            id: transport
             anchors.centerIn: parent; anchors.verticalCenterOffset: 8
             spacing: 6
             Repeater {
@@ -925,6 +960,7 @@ ApplicationWindow {
             Text { anchors.verticalCenter: parent.verticalCenter; text: fmtTime(Player.position) + " / " + fmtTime(Player.duration); color: mut; font.pixelSize: 11; font.family: mono }
             Item {
                 id: vol
+                visible: root.width >= 720   // no room beside the transport on narrow tiles
                 anchors.verticalCenter: parent.verticalCenter; width: 96; height: 14
                 Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: "#26262e" }
                 Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width * Player.volume; height: 4; radius: 2; color: "#d8d5cb" }
