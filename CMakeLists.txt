@@ -26,6 +26,7 @@ qt_add_library(flowcore STATIC
     src/lyrics.h src/lyrics.cpp
     src/playqueue.h src/playqueue.cpp
     src/m3u.h src/m3u.cpp
+    src/ytdlp.h src/ytdlp.cpp
 )
 target_include_directories(flowcore PUBLIC src)
 target_link_libraries(flowcore PUBLIC Qt6::Core Qt6::Sql TagLib::tag)
@@ -47,6 +48,7 @@ qt_add_qml_module(flow
         src/library.h src/library.cpp
         src/player.h src/player.cpp
         src/waveform.h src/waveform.cpp
+        src/downloader.h src/downloader.cpp
 )
 
 # Window icon, embedded so it also works uninstalled.
@@ -70,7 +72,7 @@ install(FILES data/fonts/Inter-OFL.txt data/fonts/SpaceGrotesk-OFL.txt data/font
 if(FLOW_BUILD_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     enable_testing()
-    foreach(name tst_playqueue tst_scanner tst_lyrics tst_m3u)
+    foreach(name tst_playqueue tst_scanner tst_lyrics tst_m3u tst_ytdlp)
         qt_add_executable(${name} tests/${name}.cpp)
         target_link_libraries(${name} PRIVATE flowcore Qt6::Test)
         add_test(NAME ${name} COMMAND ${name})
@@ -84,6 +86,12 @@ if(FLOW_BUILD_TESTS)
     qt_add_executable(tst_library tests/tst_library.cpp src/library.h src/library.cpp)
     target_link_libraries(tst_library PRIVATE flowcore Qt6::Qml Qt6::Test)
     add_test(NAME tst_library COMMAND tst_library)
+
+    # Download jobs against a fake yt-dlp (a shell script), so no network is needed.
+    qt_add_executable(tst_downloader tests/tst_downloader.cpp
+        src/library.h src/library.cpp src/downloader.h src/downloader.cpp)
+    target_link_libraries(tst_downloader PRIVATE flowcore Qt6::Qml Qt6::Test)
+    add_test(NAME tst_downloader COMMAND tst_downloader)
 
     # Integration: real scan + QMediaPlayer playback (plays a few seconds of silence).
     qt_add_executable(tst_player tests/tst_player.cpp

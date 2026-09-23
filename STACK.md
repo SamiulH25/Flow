@@ -56,14 +56,17 @@ Qt 6.11.2 (`base`, `declarative`, `multimedia` + `ffmpeg` backend, `wayland`, `s
 Flow/
   CMakeLists.txt
   src/            # flowcore (static lib, no QML): track, librarydb (SQLite, schema v3),
-                  #   libraryscanner (TagLib), lyrics (.lrc / embedded), playqueue, m3u
+                  #   libraryscanner (TagLib), lyrics (.lrc / embedded), playqueue, m3u,
+                  #   ytdlp (yt-dlp command line + output protocol)
                   # QML singletons: library (views, mixes, M3U, watcher, scan thread),
                   #   player (QMediaPlayer, queue persistence), waveform (QAudioDecoder)
+                  #   downloader (yt-dlp jobs → <music folder>/YouTube)
                   # mpris: org.mpris.MediaPlayer2 over QtDBus
   qml/Main.qml    # ports ui-demo.html v3; `import Flow` for Library / Player
   data/           # flow.desktop, flow.svg (app icon, also embedded as the window icon)
   packaging/arch/ # PKGBUILD (builds this checkout's committed HEAD)
-  tests/          # QtTest: playqueue, scanner, lyrics, m3u, waveform, library, player, mpris
+  tests/          # QtTest: playqueue, scanner, lyrics, m3u, ytdlp, waveform, library,
+                  #   downloader (fake yt-dlp script, no network), player, mpris
   STACK.md (this file)
   ui-demo.html    # clickable design spec (served via python http.server :8000)
 ```
@@ -96,7 +99,15 @@ Settings + saved queue: `~/.config/Flow/Flow.conf`.
 - Layout: full 3-pane → drawer slide-over (<1080px) → rail as overlay behind ☰ (<820px);
   dock and filter chips adapt down to the 560px minimum.
 - Desktop integration: .desktop entry + icon, Wayland app_id `flow`.
+- Downloads (rail → Downloads): paste a YouTube / YouTube Music link — a song, a playlist
+  or an album. `yt-dlp` (+ `ffmpeg`, optional deps) fetches best audio → MP3 VBR V0 with
+  tags and a square-cropped cover into `<music folder>/YouTube/<artist>/<album>/`; the
+  rescan picks them up. Playlists also become a mix in playlist order; albums
+  (`browse/MPREb…`, `list=OLAK5uy…`) get track numbers and show up under Albums.
+  One job at a time, cancellable (kills yt-dlp's whole process group), unavailable
+  videos skipped. Work in progress lives in `~/.cache/Flow/Flow/yt-dlp/`. `watch?v=…&list=…`
+  links default to the song (they are often endless radios); PLAYLIST takes the list.
 
 Deliberately not in v1:
 - Gapless playback (QtMultimedia limit; escape hatch above: QAudioSink + decoder pipeline).
-- Editing tags, streaming / remote sources, multiple library folders.
+- Editing tags, streaming / remote sources (downloads are the way in), multiple library folders.

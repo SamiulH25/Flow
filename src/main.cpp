@@ -1,3 +1,4 @@
+#include "downloader.h"
 #include "library.h"
 #include "mpris.h"
 #include "player.h"
@@ -72,8 +73,10 @@ int main(int argc, char *argv[])
     Library library(musicDir, dataDir + QStringLiteral("/library.db"),
                     cacheDir + QStringLiteral("/covers"));
     Player player(&library);
+    Downloader downloader(&library, cacheDir + QStringLiteral("/yt-dlp"));
     Library::setInstance(&library);
     Player::setInstance(&player);
+    Downloader::setInstance(&downloader);
 
     QQmlApplicationEngine engine;
     QObject::connect(

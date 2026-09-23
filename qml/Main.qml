@@ -43,7 +43,7 @@ ApplicationWindow {
     readonly property var cur: Player.current
     readonly property real progress: Player.duration > 0 ? Math.min(1, Player.position / Player.duration) : 0
     property string drawerTab: "now"     // now | queue | lyrics
-    property string page: "tracks"       // tracks | albums (album/mix detail = tracks + Library view)
+    property string page: "tracks"       // tracks | albums | downloads (album/mix detail = tracks + Library view)
     property bool tracksOnly: false      // "Tracks" hides the album strip that "Overview" shows
     property bool albumsFromGrid: false  // where BACK from an album returns to
     property bool railOpen: false        // narrow windows: rail shown as an overlay
@@ -55,7 +55,7 @@ ApplicationWindow {
     }
     function goTo(k) {
         railOpen = false;
-        if (k === "albums") { page = "albums"; return; }
+        if (k === "albums" || k === "downloads") { page = k; return; }
         page = "tracks";
         tracksOnly = k === "tracks";
         Library.showAll();
@@ -68,6 +68,7 @@ ApplicationWindow {
         drawerTab = tab;
         drawerOpen = true;
     }
+    readonly property string pageTitle: page === "albums" ? "Albums" : page === "downloads" ? "Downloads" : Library.viewTitle
     function escapeHtml(s) {
         return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
     }
@@ -332,6 +333,10 @@ ApplicationWindow {
                            : "Export failed: " + r.error);
         }
     }
+    Connections {
+        target: Downloader
+        function onNotice(text) { showToast(text); }
+    }
     property bool toastShown: false
     function showToast(text) { toast.text = text; toastShown = true; toastTimer.restart(); }
     Timer { id: toastTimer; interval: 3500; onTriggered: toastShown = false }
@@ -372,7 +377,7 @@ ApplicationWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     // Keeps the crumb short so it never reaches the search box.
                     width: Math.min(implicitWidth, Math.max(0, searchBox.x - 24 - (brand.x + 22 + 9 + 40 + 9)))
-                    text: "/  " + (page === "albums" ? "Albums" : Library.viewTitle)
+                    text: "/  " + pageTitle
                     color: mut; font.pixelSize: 13; elide: Text.ElideRight
                 }
             }
@@ -457,7 +462,9 @@ ApplicationWindow {
                             {t: "Tracks", i: "note", k: "tracks", n: Library.totalCount.toLocaleString(Qt.locale(), "f", 0),
                              on: page === "tracks" && tracksOnly && Library.viewKind === "all" && Library.format !== "Liked"},
                             {t: "Liked", i: "heart", k: "liked", n: String(Library.likedCount),
-                             on: page === "tracks" && Library.viewKind === "all" && Library.format === "Liked"}
+                             on: page === "tracks" && Library.viewKind === "all" && Library.format === "Liked"},
+                            {t: "Downloads", i: "download", k: "downloads", n: Downloader.active > 0 ? String(Downloader.active) : "",
+                             on: page === "downloads", busy: Downloader.busy}
                         ]
                         Rectangle {
                             width: parent.width; height: 34; radius: 9
@@ -466,7 +473,7 @@ ApplicationWindow {
                             Text { x: 36; anchors.verticalCenter: parent.verticalCenter; text: modelData.t; color: modelData.on ? "#fff" : soft; font.pixelSize: 13 }
                             Text {
                                 anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
-                                text: modelData.n || ""; color: dim; font.pixelSize: 10; font.family: mono
+                                text: modelData.n || ""; color: modelData.busy ? acc : dim; font.pixelSize: 10; font.family: mono
                             }
                             MouseArea { id: railHover; anchors.fill: parent; hoverEnabled: true; onClicked: goTo(modelData.k) }
                         }
@@ -617,9 +624,11 @@ ApplicationWindow {
                               right: parent.right; verticalCenter: parent.verticalCenter }
                     textFormat: Text.StyledText; elide: Text.ElideRight
                     text: "<font face='" + disp + "' size='5' color='" + ink + "'><b>"
-                          + escapeHtml(page === "albums" ? "Albums" : Library.viewTitle) + "</b></font>"
+                          + escapeHtml(pageTitle) + "</b></font>"
                           + "<font face='" + mono + "' size='2' color='" + dim + "'>&nbsp;&nbsp;&nbsp;"
-                          + (page === "albums"
+                          + (page === "downloads"
+                             ? (Downloader.active > 0 ? Downloader.active + " active" : "YouTube Music")
+                             : page === "albums"
                              ? albumGrid.count + " albums"
                              : (Library.viewSubtitle !== "" ? escapeHtml(Library.viewSubtitle) + " · " : "")
                                + Library.shownCount.toLocaleString(Qt.locale(), "f", 0) + " shown"
@@ -710,6 +719,159 @@ ApplicationWindow {
                     anchors { top: parent.top; left: parent.left; right: parent.right; topMargin: 40 }
                     visible: albumGrid.count === 0; horizontalAlignment: Text.AlignHCenter
                     text: Library.scanning ? "Scanning your music…" : "No albums yet."; color: mut; font.pixelSize: 13
+                }
+            }
+            // downloads page: YouTube / YouTube Music links → MP3s in the library (yt-dlp)
+            Item {
+                id: downloadsPage
+                anchors { top: listhead.bottom; left: parent.left; right: parent.right; bottom: parent.bottom; topMargin: 14; leftMargin: 24; rightMargin: 24 }
+                visible: page === "downloads"
+                readonly property string link: linkField.text.trim()
+                // watch?v=…&list=… is a song played from a list (often an endless
+                // radio): the song unless PLAYLIST is picked. Playlist links are lists.
+                readonly property bool hasList: /[?&]list=|\/browse\//.test(link)
+                readonly property bool onlyList: Downloader.isPlaylistUrl(link)
+                property bool wantList: false
+                readonly property bool asList: onlyList || (hasList && wantList)
+                readonly property bool ready: Downloader.available && Downloader.isSupportedUrl(link)
+                function submit() {
+                    if (link === "") return;
+                    const error = Downloader.add(link, asList);
+                    if (error !== "") { showToast(error); return; }
+                    linkField.text = "";
+                    wantList = false;
+                }
+
+                Rectangle {
+                    id: linkBox
+                    width: parent.width; height: 52; radius: 12
+                    color: panel; border.color: linkField.activeFocus ? line2 : line; border.width: 1
+                    enabled: Downloader.available; opacity: enabled ? 1 : 0.5
+                    Icon { x: 15; anchors.verticalCenter: parent.verticalCenter; name: "link"; size: 16; color: linkField.activeFocus ? soft : dim }
+                    TextField {
+                        id: linkField
+                        anchors { left: parent.left; leftMargin: 40; right: modeRow.visible ? modeRow.left : goPill.left; rightMargin: 10; verticalCenter: parent.verticalCenter }
+                        placeholderText: linkBox.width >= 520 ? "Paste a YouTube Music link — song, playlist or album" : "Paste a YouTube Music link"
+                        placeholderTextColor: dim
+                        color: ink; font.pixelSize: 13; selectByMouse: true
+                        background: Item {}
+                        onAccepted: downloadsPage.submit()
+                    }
+                    // SONG / PLAYLIST, only when the link has a list in it
+                    Row {
+                        id: modeRow
+                        anchors { right: goPill.left; rightMargin: 10; verticalCenter: parent.verticalCenter }
+                        visible: downloadsPage.hasList
+                        spacing: 4
+                        Repeater {
+                            model: [{t: "SONG", list: false}, {t: "PLAYLIST", list: true}]
+                            Rectangle {
+                                id: modeChip
+                                readonly property bool on: downloadsPage.asList === modelData.list
+                                anchors.verticalCenter: parent.verticalCenter
+                                height: 26; width: modeLabel.implicitWidth + 18; radius: 13
+                                enabled: modelData.list || !downloadsPage.onlyList
+                                opacity: enabled ? 1 : 0.4
+                                color: on ? ink : modeHover.containsMouse ? "#1e1e25" : "transparent"
+                                border.color: on ? ink : line2; border.width: 1
+                                Text { id: modeLabel; anchors.centerIn: parent; text: modelData.t; color: modeChip.on ? "#000" : soft; font.pixelSize: 10; font.family: mono; font.bold: modeChip.on }
+                                MouseArea { id: modeHover; anchors.fill: parent; hoverEnabled: true; onClicked: downloadsPage.wantList = modelData.list }
+                            }
+                        }
+                    }
+                    Pill {
+                        id: goPill
+                        anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+                        implicitHeight: 32; radius: 16
+                        solid: true; icon: "download"; text: linkBox.width >= 440 ? "DOWNLOAD" : ""
+                        opacity: downloadsPage.ready ? 1 : 0.45
+                        onClicked: downloadsPage.submit()
+                    }
+                }
+                Text {
+                    id: downloadsHint
+                    anchors { top: linkBox.bottom; left: parent.left; right: parent.right; topMargin: 10; leftMargin: 4 }
+                    wrapMode: Text.WordWrap; font.pixelSize: 11
+                    color: Downloader.available ? dim : danger
+                    text: Downloader.available
+                          ? "MP3 with tags and cover art, saved to " + Downloader.destination.replace(StandardPaths.writableLocation(StandardPaths.HomeLocation).toString().replace("file://", ""), "~")
+                            + ". Playlists become mixes; albums show up in Albums."
+                          : "Downloading needs " + Downloader.missing + ". Install it (sudo pacman -S yt-dlp ffmpeg) and restart Flow."
+                }
+                Item {
+                    id: jobsHead
+                    anchors { top: downloadsHint.bottom; left: parent.left; right: parent.right; topMargin: 22 }
+                    height: 26
+                    visible: jobList.count > 0
+                    Text { anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter } text: "QUEUE"; color: dim; font.pixelSize: 10; font.family: mono }
+                    Text {
+                        anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
+                        visible: Downloader.count > Downloader.active
+                        text: "CLEAR FINISHED"; font.pixelSize: 10; font.family: mono
+                        color: clearHover.containsMouse ? ink : dim
+                        MouseArea { id: clearHover; anchors.fill: parent; anchors.margins: -5; hoverEnabled: true; onClicked: Downloader.clearFinished() }
+                    }
+                }
+                ListView {
+                    id: jobList
+                    anchors { top: jobsHead.bottom; left: parent.left; right: parent.right; bottom: parent.bottom; topMargin: 6 }
+                    clip: true; spacing: 8; model: Downloader.jobs
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                    delegate: Rectangle {
+                        id: jobRow
+                        readonly property bool active: status === "queued" || status === "running"
+                        width: jobList.width; height: 60; radius: 11
+                        color: panel; border.color: status === "running" ? "#3d4420" : line; border.width: 1
+                        clip: true
+                        Rectangle {
+                            x: 12; anchors.verticalCenter: parent.verticalCenter
+                            width: 36; height: 36; radius: 9
+                            color: status === "running" ? "#151a0e" : "#1c1c22"
+                            Icon {
+                                anchors.centerIn: parent; size: 16
+                                name: status === "failed" ? "close" : status === "running" || status === "queued" ? "download" : isPlaylist ? "queue" : "note"
+                                color: status === "failed" ? danger : status === "running" ? acc : status === "done" ? soft : dim
+                            }
+                        }
+                        Column {
+                            anchors { left: parent.left; leftMargin: 60; right: jobSide.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                            spacing: 3
+                            Text { width: parent.width; text: title; color: status === "canceled" ? mut : ink; font.pixelSize: 13; font.family: disp; font.weight: Font.Medium; elide: Text.ElideRight }
+                            Text { width: parent.width; text: detail; color: status === "failed" ? danger : mut; font.pixelSize: 11; elide: Text.ElideRight }
+                        }
+                        Row {
+                            id: jobSide
+                            anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                            spacing: 4
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: status === "running" ? Math.floor(progress * 100) + "%" : status.toUpperCase()
+                                color: status === "running" ? acc : status === "failed" ? danger : dim
+                                font.pixelSize: 10; font.family: mono
+                            }
+                            IconButton {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 30; height: 30; icon: "close"; iconSize: 14
+                                visible: jobRow.active; tip: "Cancel"
+                                onClicked: Downloader.cancel(jobId)
+                            }
+                            Item { width: 4; height: 1; visible: !jobRow.active }
+                        }
+                        Rectangle {   // progress across the whole job
+                            anchors { left: parent.left; bottom: parent.bottom }
+                            visible: status === "running"
+                            height: 3; width: parent.width * progress; color: acc
+                            Behavior on width { NumberAnimation { duration: 180 } }
+                        }
+                    }
+                    Text {
+                        anchors { top: parent.top; left: parent.left; right: parent.right; topMargin: 30 }
+                        visible: jobList.count === 0 && Downloader.available
+                        horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                        color: mut; font.pixelSize: 12; lineHeight: 1.3
+                        text: "Nothing downloading.\nIn YouTube Music, pick Share → Copy link on a song, playlist or album and paste it above."
+                    }
                 }
             }
             // track list; the album strip and the column header scroll with it

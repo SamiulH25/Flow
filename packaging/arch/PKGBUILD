@@ -9,7 +9,9 @@ url="https://github.com/"
 license=('custom:unknown')
 depends=('qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-multimedia-ffmpeg' 'qt6-svg' 'taglib')
 optdepends=('qt6-wayland: native Wayland windows'
-            'playerctl: control playback from the terminal or keybinds (MPRIS)')
+            'playerctl: control playback from the terminal or keybinds (MPRIS)'
+            'yt-dlp: download songs, playlists and albums from YouTube Music'
+            'ffmpeg: convert YouTube downloads to MP3 (with yt-dlp)')
 makedepends=('cmake' 'ninja' 'git')
 provides=('flow')
 source=("flow::git+file://$(cd "$startdir/../.." && pwd)")

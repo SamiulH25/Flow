@@ -15,6 +15,7 @@
 #include <QStorageInfo>
 
 #include <algorithm>
+#include <utility>
 
 // ---------------------------------------------------------------- TrackListModel
 
@@ -567,8 +568,11 @@ void Library::onScanFinished(bool ok, const QString &error, const QStringList &d
     emit scanningChanged();
 
     if (m_rescanPending) {
+        // Pending mixes wait for the scan that will see their files.
         m_rescanPending = false;
         rescan();
+    } else if (ok) {
+        createPendingMixes();
     }
 }
 
@@ -829,6 +833,39 @@ QVariantMap Library::importMix(const QUrl &file)
         return fail(m_error);
     return {{QStringLiteral("ok"), true}, {QStringLiteral("mixId"), mixId},
             {QStringLiteral("added"), int(ids.size())}, {QStringLiteral("skipped"), skipped}};
+}
+
+void Library::addMixAfterScan(const QString &name, const QStringList &paths)
+{
+    m_pendingMixes.append(PendingMix{name, paths});
+    rescan();
+}
+
+void Library::createPendingMixes()
+{
+    const QList<PendingMix> pending = std::exchange(m_pendingMixes, {});
+    for (const PendingMix &p : pending) {
+        QList<qint64> ids;
+        for (const QString &path : p.paths) {
+            const Track *t = trackByPath(QDir::cleanPath(path));
+            if (!t)
+                t = trackByPath(QFileInfo(path).canonicalFilePath());
+            if (t)
+                ids.append(t->id);
+        }
+        const int missing = int(p.paths.size() - ids.size());
+        const qint64 mixId = ids.isEmpty() ? -1 : createMix(p.name);
+        const int row = m_mixModel.rowOf(mixId);
+        bool saved = row >= 0;
+        if (saved) {
+            m_mixModel.mixes()[row].trackIds = ids;
+            saved = saveMix(row);
+        }
+        if (saved)
+            emit mixAdded(mixId, p.name, int(ids.size()), missing);
+        else
+            emit mixAdded(-1, p.name, 0, int(p.paths.size()));
+    }
 }
 
 QVariantMap Library::exportMix(qint64 mixId, const QUrl &file)

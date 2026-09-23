@@ -161,6 +161,8 @@ public:
     void storePeaks(qint64 id, const QByteArray &peaks);
 
     Q_INVOKABLE void rescan();
+    // Rescans once things settle (the same debounce as file-watcher events).
+    void rescanSoon() { m_rescanDebounce.start(); }
     Q_INVOKABLE void toggleLike(qint64 id);
     Q_INVOKABLE QVariantList visibleTrackIds() const;       // current filter/sort order
     Q_INVOKABLE QVariantList albumTrackIds(int albumRow) const;
@@ -183,6 +185,11 @@ public:
     Q_INVOKABLE QVariantMap importMix(const QUrl &file);
     Q_INVOKABLE QVariantMap exportMix(qint64 mixId, const QUrl &file);
 
+    // Rescans, then makes a mix of `paths` (in that order) from what the scan
+    // indexed: downloaded playlists. Emits mixAdded, with mixId -1 when none
+    // of the files made it into the library.
+    void addMixAfterScan(const QString &name, const QStringList &paths);
+
 signals:
     void queryChanged();
     void formatChanged();
@@ -195,6 +202,7 @@ signals:
     void reloaded();                // whole library reloaded from the database
     void viewChanged();
     void musicDirChanged();
+    void mixAdded(qint64 mixId, const QString &name, int added, int missing);
 
 private:
     void reload();
@@ -207,6 +215,7 @@ private:
     const AlbumListModel::Album *viewedAlbum() const;
     void setView(const QString &kind, const QString &albumKey, qint64 mixId);
     void onScanFinished(bool ok, const QString &error, const QStringList &dirs, bool changed);
+    void createPendingMixes();
 
     static inline Library *s_instance = nullptr;
 
@@ -238,6 +247,12 @@ private:
     int m_scanProgress = 0;
     QFileSystemWatcher m_watcher;
     QTimer m_rescanDebounce;
+
+    struct PendingMix {
+        QString name;
+        QStringList paths;
+    };
+    QList<PendingMix> m_pendingMixes;   // waiting for a scan, see addMixAfterScan
 
     QString m_error;
     QString m_storageText;
