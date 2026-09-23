@@ -627,7 +627,11 @@ ApplicationWindow {
                           + escapeHtml(pageTitle) + "</b></font>"
                           + "<font face='" + mono + "' size='2' color='" + dim + "'>&nbsp;&nbsp;&nbsp;"
                           + (page === "downloads"
-                             ? (Downloader.active > 0 ? Downloader.active + " active" : "YouTube Music")
+                             ? (Downloader.active > 0
+                                ? (Downloader.runningCount + " running"
+                                   + (Downloader.active > Downloader.runningCount
+                                      ? " · " + (Downloader.active - Downloader.runningCount) + " queued" : ""))
+                                : "YouTube Music")
                              : page === "albums"
                              ? albumGrid.count + " albums"
                              : (Library.viewSubtitle !== "" ? escapeHtml(Library.viewSubtitle) + " · " : "")
@@ -804,12 +808,31 @@ ApplicationWindow {
                     height: 26
                     visible: jobList.count > 0
                     Text { anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter } text: "QUEUE"; color: dim; font.pixelSize: 10; font.family: mono }
-                    Text {
+                    Row {
                         anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
-                        visible: Downloader.count > Downloader.active
-                        text: "CLEAR FINISHED"; font.pixelSize: 10; font.family: mono
-                        color: clearHover.containsMouse ? ink : dim
-                        MouseArea { id: clearHover; anchors.fill: parent; anchors.margins: -5; hoverEnabled: true; onClicked: Downloader.clearFinished() }
+                        spacing: 12
+                        Row {
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 6
+                            Text { anchors.verticalCenter: parent.verticalCenter; text: Downloader.maxConcurrent + " PARALLEL"; color: dim; font.pixelSize: 10; font.family: mono }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "−"; color: Downloader.maxConcurrent > 1 ? soft : dim; font.pixelSize: 14
+                                MouseArea { anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; onClicked: if (Downloader.maxConcurrent > 1) Downloader.maxConcurrent -= 1 }
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "+"; color: Downloader.maxConcurrent < 4 ? soft : dim; font.pixelSize: 14
+                                MouseArea { anchors.fill: parent; anchors.margins: -6; hoverEnabled: true; onClicked: if (Downloader.maxConcurrent < 4) Downloader.maxConcurrent += 1 }
+                            }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: Downloader.count > Downloader.active
+                            text: "CLEAR FINISHED"; font.pixelSize: 10; font.family: mono
+                            color: clearHover.containsMouse ? ink : dim
+                            MouseArea { id: clearHover; anchors.fill: parent; anchors.margins: -5; hoverEnabled: true; onClicked: Downloader.clearFinished() }
+                        }
                     }
                 }
                 ListView {
@@ -821,42 +844,114 @@ ApplicationWindow {
                     delegate: Rectangle {
                         id: jobRow
                         readonly property bool active: status === "queued" || status === "running"
-                        width: jobList.width; height: 60; radius: 11
+                        readonly property bool expandable: itemCount > 0
+                        property bool expanded: false
+                        width: jobList.width
+                        height: 60 + (expanded && expandable ? trackBlock.height + 8 : 0)
+                        radius: 11
                         color: panel; border.color: status === "running" ? "#3d4420" : line; border.width: 1
                         clip: true
-                        Rectangle {
-                            x: 12; anchors.verticalCenter: parent.verticalCenter
-                            width: 36; height: 36; radius: 9
-                            color: status === "running" ? "#151a0e" : "#1c1c22"
-                            Icon {
-                                anchors.centerIn: parent; size: 16
-                                name: status === "failed" ? "close" : status === "running" || status === "queued" ? "download" : isPlaylist ? "queue" : "note"
-                                color: status === "failed" ? danger : status === "running" ? acc : status === "done" ? soft : dim
-                            }
-                        }
                         Column {
-                            anchors { left: parent.left; leftMargin: 60; right: jobSide.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
-                            spacing: 3
-                            Text { width: parent.width; text: title; color: status === "canceled" ? mut : ink; font.pixelSize: 13; font.family: disp; font.weight: Font.Medium; elide: Text.ElideRight }
-                            Text { width: parent.width; text: detail; color: status === "failed" ? danger : mut; font.pixelSize: 11; elide: Text.ElideRight }
-                        }
-                        Row {
-                            id: jobSide
-                            anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
-                            spacing: 4
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: status === "running" ? Math.floor(progress * 100) + "%" : status.toUpperCase()
-                                color: status === "running" ? acc : status === "failed" ? danger : dim
-                                font.pixelSize: 10; font.family: mono
+                            anchors { left: parent.left; right: parent.right; top: parent.top }
+                            Item {
+                                id: jobHeader
+                                width: parent.width; height: 60
+                                Rectangle {
+                                    x: 12; anchors.verticalCenter: parent.verticalCenter
+                                    width: 36; height: 36; radius: 9
+                                    color: status === "running" ? "#151a0e" : "#1c1c22"
+                                    Icon {
+                                        anchors.centerIn: parent; size: 16
+                                        name: status === "failed" ? "close" : status === "running" || status === "queued" ? "download" : isPlaylist ? "queue" : "note"
+                                        color: status === "failed" ? danger : status === "running" ? acc : status === "done" ? soft : dim
+                                    }
+                                }
+                                Column {
+                                    anchors { left: parent.left; leftMargin: 60; right: jobSide.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                                    spacing: 3
+                                    width: parent.width - 60 - jobSide.width - 20
+                                    Text { width: parent.width; text: title; color: status === "canceled" ? mut : ink; font.pixelSize: 13; font.family: disp; font.weight: Font.Medium; elide: Text.ElideRight }
+                                    Text { width: parent.width; text: detail; color: status === "failed" ? danger : mut; font.pixelSize: 11; elide: Text.ElideRight }
+                                }
+                                Row {
+                                    id: jobSide
+                                    anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                                    spacing: 4
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: status === "running" ? Math.floor(progress * 100) + "%" : status.toUpperCase()
+                                        color: status === "running" ? acc : status === "failed" ? danger : dim
+                                        font.pixelSize: 10; font.family: mono
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: jobRow.expandable
+                                        text: jobRow.expanded ? "▾" : "▸"; color: dim; font.pixelSize: 12
+                                    }
+                                    IconButton {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 30; height: 30; icon: "close"; iconSize: 14
+                                        visible: jobRow.active; tip: "Cancel"
+                                        onClicked: Downloader.cancel(jobId)
+                                    }
+                                    Item { width: 4; height: 1; visible: !jobRow.active }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    enabled: jobRow.expandable
+                                    onClicked: jobRow.expanded = !jobRow.expanded
+                                }
                             }
-                            IconButton {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 30; height: 30; icon: "close"; iconSize: 14
-                                visible: jobRow.active; tip: "Cancel"
-                                onClicked: Downloader.cancel(jobId)
+                            Column {
+                                id: trackBlock
+                                width: parent.width
+                                visible: jobRow.expanded && jobRow.expandable
+                                spacing: 0
+                                Repeater {
+                                    model: items
+                                    delegate: Item {
+                                        required property var modelData
+                                        width: trackBlock.width; height: 30
+                                        Row {
+                                            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 60; rightMargin: 12 }
+                                            spacing: 8
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 28
+                                                text: String(modelData.index).padStart(2, "0")
+                                                color: dim; font.pixelSize: 10; font.family: mono
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: parent.width - 28 - 8 - 86
+                                                text: modelData.title; color: modelData.state === "failed" ? dim : ink
+                                                font.pixelSize: 12; elide: Text.ElideRight
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 78; horizontalAlignment: Text.AlignRight
+                                                text: modelData.state === "downloading" ? Math.floor(modelData.progress * 100) + "%"
+                                                      : modelData.state === "done" ? "DONE"
+                                                      : modelData.state === "failed" ? "SKIPPED" : "QUEUED"
+                                                color: modelData.state === "downloading" ? acc
+                                                       : modelData.state === "done" ? soft
+                                                       : modelData.state === "failed" ? danger : dim
+                                                font.pixelSize: 10; font.family: mono
+                                            }
+                                        }
+                                        Rectangle {
+                                            anchors { left: parent.left; leftMargin: 60; right: parent.right; rightMargin: 12; bottom: parent.bottom }
+                                            height: 2; radius: 1; color: "#232329"; visible: modelData.state === "downloading"
+                                            Rectangle { width: parent.width * modelData.progress; height: 2; radius: 1; color: acc }
+                                        }
+                                        Rectangle {
+                                            anchors { left: parent.left; leftMargin: 60; right: parent.right; bottom: parent.bottom }
+                                            height: 1; color: line; opacity: 0.5; visible: modelData.state !== "downloading"
+                                        }
+                                    }
+                                }
+                                Item { width: 1; height: 6 }
                             }
-                            Item { width: 4; height: 1; visible: !jobRow.active }
                         }
                         Rectangle {   // progress across the whole job
                             anchors { left: parent.left; bottom: parent.bottom }

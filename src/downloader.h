@@ -13,9 +13,10 @@ class QQmlEngine;
 class Library;
 
 // Downloads songs, playlists and albums from YouTube / YouTube Music with
-// yt-dlp into <music folder>/YouTube, one job at a time. Finished files are
-// picked up by a library rescan; a playlist also becomes a mix (albums
-// already show up as albums). The object is the job list model itself.
+// yt-dlp into <music folder>/YouTube, up to maxConcurrent jobs at once.
+// Finished files are picked up by a library rescan; a playlist also becomes
+// a mix (albums already show up as albums). The object is the job list model
+// itself.
 class Downloader : public QAbstractListModel
 {
     Q_OBJECT
@@ -28,6 +29,8 @@ class Downloader : public QAbstractListModel
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(int active READ active NOTIFY countChanged)   // queued + running
+    Q_PROPERTY(int runningCount READ runningCount NOTIFY countChanged)
+    Q_PROPERTY(int maxConcurrent READ maxConcurrent WRITE setMaxConcurrent NOTIFY maxConcurrentChanged)
     Q_PROPERTY(QString destination READ destination NOTIFY destinationChanged)
 
 public:
@@ -39,6 +42,8 @@ public:
         Progress,   // 0..1 over the whole job
         Detail,     // "3 / 12 · Song" while running, the outcome after
         IsPlaylist,
+        Items,      // QVariantList of {index, title, artist, state, progress}
+        ItemCount,
     };
 
     // `program` overrides the yt-dlp found on PATH (tests use a fake one);
@@ -57,9 +62,12 @@ public:
     QAbstractItemModel *jobs() { return this; }
     bool available() const { return m_missing.isEmpty(); }
     QString missing() const { return m_missing; }
-    bool busy() const { return m_process != nullptr; }
+    bool busy() const { return !m_running.isEmpty(); }
     int count() const { return int(m_jobs.size()); }
     int active() const;
+    int runningCount() const { return int(m_running.size()); }
+    int maxConcurrent() const { return m_maxConcurrent; }
+    void setMaxConcurrent(int n);
     QString destination() const;
 
     Q_INVOKABLE static bool isSupportedUrl(const QString &url);
@@ -70,15 +78,25 @@ public:
     Q_INVOKABLE QString add(const QString &url, bool playlist);
     Q_INVOKABLE void cancel(int jobId);
     Q_INVOKABLE void clearFinished();
+    Q_INVOKABLE QVariantList jobItems(int jobId) const;
 
 signals:
     void busyChanged();
     void countChanged();
     void destinationChanged();
+    void maxConcurrentChanged();
     // One line for a toast, when a job ends (and when its mix is made).
     void notice(const QString &text);
 
 private:
+    struct ItemStatus {
+        int index = 0;
+        QString title;
+        QString artist;
+        QString state = QStringLiteral("waiting");   // waiting | downloading | done | failed
+        qreal progress = 0;
+        QString file;
+    };
     struct Job {
         int id = 0;
         QString url;
@@ -94,15 +112,26 @@ private:
         QStringList errors;
         bool canceled = false;
         QString outcome;
+        QList<ItemStatus> items;   // per-track status, in index order
+    };
+    struct Running {
+        QProcess *process = nullptr;
+        QString temp;
+        QByteArray outBuf;
+        QByteArray errBuf;
     };
 
     int rowOf(int jobId) const;
     void changed(int row);
+    static QVariantList itemsVariant(const Job &job);
+    ItemStatus *findItem(Job &job, int index);
+    void ensureItems(Job &job, int count);
     void startNext();
-    void readOutput(QProcess::ProcessChannel channel);
-    void handleLine(const QByteArray &line);
-    void onFinished(int exitCode, QProcess::ExitStatus status);
-    void stopProcess();
+    void startJob(int row);
+    void readOutput(int jobId, QProcess::ProcessChannel channel);
+    void handleLine(int jobId, const QByteArray &line);
+    void onFinished(int jobId, int exitCode, QProcess::ExitStatus status);
+    void stopProcess(int jobId);
 
     static inline Downloader *s_instance = nullptr;
 
@@ -112,9 +141,6 @@ private:
     QString m_missing;
     QList<Job> m_jobs;
     int m_nextId = 1;
-    QProcess *m_process = nullptr;
-    int m_runningId = 0;
-    QString m_runningTemp;
-    QByteArray m_stdoutBuffer;
-    QByteArray m_stderrBuffer;
+    int m_maxConcurrent = 3;
+    QHash<int, Running> m_running;   // jobId -> live yt-dlp process
 };

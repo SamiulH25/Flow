@@ -39,16 +39,22 @@ Downloader::Downloader(Library *library, const QString &tempRoot, const QString 
 
 Downloader::~Downloader()
 {
-    if (!m_process)
-        return;
-    m_process->disconnect(this);
-    stopProcess();
-    if (!m_process->waitForFinished(3000)) {
-        ::kill(-pid_t(m_process->processId()), SIGKILL);
-        m_process->waitForFinished(1000);
+    for (auto it = m_running.begin(); it != m_running.end(); ++it)
+        it.value().process->disconnect(this);
+    for (auto &r : m_running) {
+        if (r.process->processId() > 0)
+            ::kill(-pid_t(r.process->processId()), SIGTERM);
     }
-    delete m_process;
-    QDir(m_runningTemp).removeRecursively();
+    for (auto &r : m_running) {
+        if (!r.process->waitForFinished(2000)) {
+            if (r.process->processId() > 0)
+                ::kill(-pid_t(r.process->processId()), SIGKILL);
+            r.process->waitForFinished(1000);
+        }
+        QDir(r.temp).removeRecursively();
+        delete r.process;
+    }
+    m_running.clear();
 }
 
 Downloader *Downloader::create(QQmlEngine *, QJSEngine *jsEngine)
@@ -81,13 +87,27 @@ QVariant Downloader::data(const QModelIndex &index, int role) const
             return job.item;
         return QString(job.url).remove(QRegularExpression(QStringLiteral("^https?://(www\\.)?")));
     case State: return job.state;
-    case Progress:
+    case Progress: {
         if (job.state == u"done")
             return 1.0;
+        if (!job.items.isEmpty()) {
+            double done = 0;
+            for (const ItemStatus &it : job.items) {
+                if (it.state == u"done")
+                    done += 1;
+                else if (it.state == u"downloading")
+                    done += qBound(0.0, it.progress, 1.0);
+            }
+            return done / double(job.items.size());
+        }
         return job.count > 0 ? (job.index - 1 + job.itemProgress) / job.count : 0.0;
+    }
     case Detail:
-        if (job.state == u"queued")
+        if (job.state == u"queued") {
+            const int waiting = runningCount() >= m_maxConcurrent ? m_maxConcurrent : 0;
+            Q_UNUSED(waiting);
             return QStringLiteral("Waiting");
+        }
         if (job.state != u"running")
             return job.outcome;
         if (job.index == 0)
@@ -96,6 +116,8 @@ QVariant Downloader::data(const QModelIndex &index, int role) const
             return QStringLiteral("%1 / %2 · %3").arg(job.index).arg(job.count).arg(job.item);
         return job.itemProgress >= 1 ? QStringLiteral("Converting…") : job.item;
     case IsPlaylist: return job.playlist;
+    case Items: return itemsVariant(job);
+    case ItemCount: return int(job.items.size());
     }
     return {};
 }
@@ -103,7 +125,8 @@ QVariant Downloader::data(const QModelIndex &index, int role) const
 QHash<int, QByteArray> Downloader::roleNames() const
 {
     return {{JobId, "jobId"}, {Url, "url"}, {Title, "title"}, {State, "status"},
-            {Progress, "progress"}, {Detail, "detail"}, {IsPlaylist, "isPlaylist"}};
+            {Progress, "progress"}, {Detail, "detail"}, {IsPlaylist, "isPlaylist"},
+            {Items, "items"}, {ItemCount, "itemCount"}};
 }
 
 int Downloader::rowOf(int jobId) const
@@ -121,11 +144,65 @@ void Downloader::changed(int row)
         emit dataChanged(index(row), index(row));
 }
 
+QVariantList Downloader::itemsVariant(const Job &job)
+{
+    QVariantList out;
+    out.reserve(job.items.size());
+    for (const ItemStatus &it : job.items) {
+        out.append(QVariantMap{
+            {QStringLiteral("index"), it.index},
+            {QStringLiteral("title"), it.title},
+            {QStringLiteral("artist"), it.artist},
+            {QStringLiteral("state"), it.state},
+            {QStringLiteral("progress"), it.progress},
+            {QStringLiteral("file"), it.file},
+        });
+    }
+    return out;
+}
+
+Downloader::ItemStatus *Downloader::findItem(Job &job, int index)
+{
+    for (ItemStatus &it : job.items) {
+        if (it.index == index)
+            return &it;
+    }
+    return nullptr;
+}
+
+void Downloader::ensureItems(Job &job, int count)
+{
+    if (count <= 0)
+        return;
+    for (int i = 1; i <= count; ++i) {
+        if (!findItem(job, i)) {
+            ItemStatus it;
+            it.index = i;
+            it.title = QStringLiteral("Track %1").arg(i);
+            it.state = QStringLiteral("waiting");
+            job.items.append(it);
+        }
+    }
+    std::sort(job.items.begin(), job.items.end(),
+              [](const ItemStatus &a, const ItemStatus &b) { return a.index < b.index; });
+}
+
 int Downloader::active() const
 {
     return int(std::count_if(m_jobs.cbegin(), m_jobs.cend(), [](const Job &job) {
         return job.state == u"queued" || job.state == u"running";
     }));
+}
+
+void Downloader::setMaxConcurrent(int n)
+{
+    n = qBound(1, n, 8);
+    if (n == m_maxConcurrent)
+        return;
+    m_maxConcurrent = n;
+    emit maxConcurrentChanged();
+    emit countChanged();
+    startNext();
 }
 
 QString Downloader::destination() const
@@ -181,11 +258,15 @@ void Downloader::cancel(int jobId)
     if (job.state == u"queued") {
         job.state = QStringLiteral("canceled");
         job.outcome = QStringLiteral("Canceled");
+        for (ItemStatus &it : job.items) {
+            if (it.state == u"waiting" || it.state == u"downloading")
+                it.state = QStringLiteral("failed");
+        }
         changed(row);
         emit countChanged();
     } else if (job.state == u"running" && !job.canceled) {
         job.canceled = true;
-        stopProcess();   // onFinished wraps up
+        stopProcess(jobId);   // onFinished wraps up
     }
 }
 
@@ -202,131 +283,217 @@ void Downloader::clearFinished()
     emit countChanged();
 }
 
+QVariantList Downloader::jobItems(int jobId) const
+{
+    const int row = rowOf(jobId);
+    if (row < 0)
+        return {};
+    return itemsVariant(m_jobs.at(row));
+}
+
 void Downloader::startNext()
 {
-    if (m_process)
-        return;
-    int row = -1;
-    for (int i = int(m_jobs.size()) - 1; i >= 0; --i) {   // oldest first
-        if (m_jobs.at(i).state == u"queued") {
-            row = i;
-            break;
+    while (int(m_running.size()) < m_maxConcurrent) {
+        int row = -1;
+        for (int i = int(m_jobs.size()) - 1; i >= 0; --i) {   // oldest first
+            if (m_jobs.at(i).state == u"queued") {
+                row = i;
+                break;
+            }
         }
+        if (row < 0)
+            return;
+        startJob(row);
     }
-    if (row < 0)
-        return;
+}
 
+void Downloader::startJob(int row)
+{
     Job &job = m_jobs[row];
+    const int jobId = job.id;
     job.state = QStringLiteral("running");
-    m_runningId = job.id;
-    m_runningTemp = m_tempRoot + QStringLiteral("/job-") + QString::number(job.id);
-    QDir(m_runningTemp).removeRecursively();
-    QDir().mkpath(m_runningTemp);
+    const QString temp = m_tempRoot + QStringLiteral("/job-") + QString::number(jobId);
+    QDir(temp).removeRecursively();
+    QDir().mkpath(temp);
     QDir().mkpath(destination());
 
     YtDlp::Request request;
     request.url = job.url;
     request.outDir = destination();
-    request.tempDir = m_runningTemp;
+    request.tempDir = temp;
     request.playlist = job.playlist;
     request.album = job.album;
 
-    m_stdoutBuffer.clear();
-    m_stderrBuffer.clear();
-    m_process = new QProcess(this);
-    m_process->setProgram(m_program);
-    m_process->setArguments(YtDlp::arguments(request));
+    const bool wasIdle = m_running.isEmpty();
+    QProcess *process = new QProcess(this);
+    process->setProgram(m_program);
+    process->setArguments(YtDlp::arguments(request));
     // Own process group: cancelling must also stop the ffmpeg yt-dlp runs.
-    m_process->setChildProcessModifier([] { ::setpgid(0, 0); });
-    connect(m_process, &QProcess::readyReadStandardOutput, this,
-            [this] { readOutput(QProcess::StandardOutput); });
-    connect(m_process, &QProcess::readyReadStandardError, this,
-            [this] { readOutput(QProcess::StandardError); });
-    connect(m_process, &QProcess::finished, this, &Downloader::onFinished);
-    connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart)
-            onFinished(-1, QProcess::CrashExit);
-    });
+    process->setChildProcessModifier([] { ::setpgid(0, 0); });
+    Running running;
+    running.process = process;
+    running.temp = temp;
+    m_running.insert(jobId, running);
+    connect(process, &QProcess::readyReadStandardOutput, this,
+            [this, jobId] { readOutput(jobId, QProcess::StandardOutput); });
+    connect(process, &QProcess::readyReadStandardError, this,
+            [this, jobId] { readOutput(jobId, QProcess::StandardError); });
+    connect(process, &QProcess::finished, this,
+            [this, jobId](int code, QProcess::ExitStatus status) { onFinished(jobId, code, status); });
+    connect(process, &QProcess::errorOccurred, this,
+            [this, jobId](QProcess::ProcessError error) {
+                if (error == QProcess::FailedToStart)
+                    onFinished(jobId, -1, QProcess::CrashExit);
+            });
     changed(row);
-    emit busyChanged();
-    m_process->start();
+    emit countChanged();
+    if (wasIdle)
+        emit busyChanged();
+    process->start();
 }
 
-void Downloader::stopProcess()
+void Downloader::stopProcess(int jobId)
 {
-    if (m_process && m_process->processId() > 0)
-        ::kill(-pid_t(m_process->processId()), SIGTERM);
+    const auto it = m_running.find(jobId);
+    if (it == m_running.end())
+        return;
+    QProcess *process = it.value().process;
+    if (process && process->processId() > 0)
+        ::kill(-pid_t(process->processId()), SIGTERM);
 }
 
-void Downloader::readOutput(QProcess::ProcessChannel channel)
+void Downloader::readOutput(int jobId, QProcess::ProcessChannel channel)
 {
-    QByteArray &buffer = channel == QProcess::StandardOutput ? m_stdoutBuffer : m_stderrBuffer;
-    m_process->setReadChannel(channel);
-    buffer += m_process->readAll();
+    const auto it = m_running.find(jobId);
+    if (it == m_running.end())
+        return;
+    Running &running = m_running[jobId];
+    QProcess *process = running.process;
+    if (!process)
+        return;
+    QByteArray &buffer = channel == QProcess::StandardOutput ? running.outBuf : running.errBuf;
+    process->setReadChannel(channel);
+    buffer += process->readAll();
     qsizetype start = 0;
     for (qsizetype i = 0; i < buffer.size(); ++i) {
         if (buffer.at(i) == '\n' || buffer.at(i) == '\r') {
             if (i > start)
-                handleLine(buffer.mid(start, i - start));
+                handleLine(jobId, buffer.mid(start, i - start));
             start = i + 1;
         }
     }
     buffer.remove(0, start);
 }
 
-void Downloader::handleLine(const QByteArray &line)
+void Downloader::handleLine(int jobId, const QByteArray &line)
 {
-    const int row = rowOf(m_runningId);
+    const int row = rowOf(jobId);
     if (row < 0)
         return;
     Job &job = m_jobs[row];
     const YtDlp::Event e = YtDlp::parseLine(line);
     switch (e.kind) {
-    case YtDlp::Event::Progress:
+    case YtDlp::Event::Progress: {
         job.itemProgress = e.total > 0 ? qBound(0.0, double(e.done) / double(e.total), 1.0) : 0.0;
+        if (ItemStatus *it = findItem(job, job.index)) {
+            if (it->state != u"done") {
+                it->state = QStringLiteral("downloading");
+                it->progress = job.itemProgress;
+            }
+        }
         break;
+    }
     case YtDlp::Event::Item:
         job.index = e.index;
-        job.count = e.count;
+        job.count = qMax(job.count, e.count);
         job.item = e.title;
         job.itemProgress = 0;
         if (!e.list.isEmpty())
             job.list = e.list;
+        ensureItems(job, job.count);
+        if (ItemStatus *it = findItem(job, e.index)) {
+            it->title = e.title;
+            it->artist = e.artist;
+            if (it->state != u"done")
+                it->state = QStringLiteral("downloading");
+            it->progress = 0;
+        }
         break;
-    case YtDlp::Event::File:
+    case YtDlp::Event::File: {
         job.files.append(QDir::cleanPath(e.path));
         job.itemProgress = 1;
+        if (ItemStatus *it = findItem(job, job.index)) {
+            it->state = QStringLiteral("done");
+            it->progress = 1;
+            it->file = QDir::cleanPath(e.path);
+        } else if (!job.items.isEmpty()) {
+            // Single-song jobs that never saw an item line still get a row.
+            ItemStatus *last = nullptr;
+            for (ItemStatus &it : job.items) {
+                if (it.state == u"downloading")
+                    last = &it;
+            }
+            if (last) {
+                last->state = QStringLiteral("done");
+                last->progress = 1;
+                last->file = QDir::cleanPath(e.path);
+            }
+        }
         // Songs show up as they finish. Not left to the file watcher: it misses
         // folders created before it watches their parent (a first download).
         m_library->rescanSoon();
         break;
-    case YtDlp::Event::Error:
+    }
+    case YtDlp::Event::Error: {
         job.errors.append(e.message);
+        // Attribute playlist gaps (e.g. an unavailable video that never emits
+        // flow-item) to the next waiting track so the expanded list shows it.
+        ItemStatus *slot = nullptr;
+        for (ItemStatus &it : job.items) {
+            if (it.state == u"waiting" && it.index > job.index) {
+                if (!slot || it.index < slot->index)
+                    slot = &it;
+            }
+        }
+        if (!slot) {
+            for (ItemStatus &it : job.items) {
+                if (it.state == u"waiting") {
+                    if (!slot || it.index < slot->index)
+                        slot = &it;
+                }
+            }
+        }
+        if (slot) {
+            slot->state = QStringLiteral("failed");
+            slot->progress = 0;
+        }
         break;
+    }
     case YtDlp::Event::None:
         return;
     }
     changed(row);
 }
 
-void Downloader::onFinished(int exitCode, QProcess::ExitStatus status)
+void Downloader::onFinished(int jobId, int exitCode, QProcess::ExitStatus status)
 {
-    if (!m_process)
+    const auto it = m_running.find(jobId);
+    if (it == m_running.end())
         return;
+    Running running = m_running.take(jobId);
     // Whatever was left without a newline.
-    for (QByteArray *buffer : {&m_stdoutBuffer, &m_stderrBuffer}) {
+    for (QByteArray *buffer : {&running.outBuf, &running.errBuf}) {
         if (!buffer->isEmpty())
-            handleLine(*buffer);
+            handleLine(jobId, *buffer);
         buffer->clear();
     }
-    const bool failedToStart = m_process->error() == QProcess::FailedToStart;
-    m_process->disconnect(this);
-    m_process->deleteLater();
-    m_process = nullptr;
-    QDir(m_runningTemp).removeRecursively();
+    const bool failedToStart = running.process->error() == QProcess::FailedToStart;
+    running.process->disconnect(this);
+    running.process->deleteLater();
+    QDir(running.temp).removeRecursively();
 
-    const int row = rowOf(m_runningId);
-    m_runningId = 0;
+    const bool nowIdle = m_running.isEmpty();
+    const int row = rowOf(jobId);
     if (row >= 0) {
         Job &job = m_jobs[row];
         const int n = int(job.files.size());
@@ -337,11 +504,29 @@ void Downloader::onFinished(int exitCode, QProcess::ExitStatus status)
         if (job.canceled) {
             job.state = QStringLiteral("canceled");
             job.outcome = n > 0 ? QStringLiteral("Canceled · kept ") + songs : QStringLiteral("Canceled");
+            for (ItemStatus &item : job.items) {
+                if (item.state == u"waiting" || item.state == u"downloading") {
+                    item.state = QStringLiteral("failed");
+                    item.progress = 0;
+                }
+            }
         } else if (n > 0) {
             job.state = QStringLiteral("done");
             job.outcome = songs;
             if (!job.errors.isEmpty())
                 job.outcome += QStringLiteral(" · %1 unavailable").arg(job.errors.size());
+            for (ItemStatus &item : job.items) {
+                if (item.state == u"downloading" || item.state == u"waiting") {
+                    // Leftover placeholders never emitted by yt-dlp belong to
+                    // skipped entries; don't leave them spinning.
+                    if (item.title.startsWith(QStringLiteral("Track "))) {
+                        item.state = QStringLiteral("failed");
+                    } else {
+                        item.state = QStringLiteral("done");
+                        item.progress = 1;
+                    }
+                }
+            }
         } else {
             job.state = QStringLiteral("failed");
             if (failedToStart)
@@ -353,8 +538,27 @@ void Downloader::onFinished(int exitCode, QProcess::ExitStatus status)
             else
                 job.outcome = exitCode == 0 ? QStringLiteral("Nothing to download")
                                             : QStringLiteral("yt-dlp failed (exit code %1)").arg(exitCode);
+            if (job.items.isEmpty()) {
+                ItemStatus item;
+                item.index = 1;
+                item.title = job.item.isEmpty() ? title : job.item;
+                item.state = QStringLiteral("failed");
+                job.items.append(item);
+            } else {
+                for (ItemStatus &item : job.items) {
+                    if (item.state == u"waiting" || item.state == u"downloading")
+                        item.state = QStringLiteral("failed");
+                }
+            }
         }
         job.itemProgress = job.state == u"done" ? 1 : job.itemProgress;
+        // Keep overall progress consistent for the finished state.
+        if (job.state == u"done") {
+            for (ItemStatus &item : job.items) {
+                if (item.state == u"done")
+                    item.progress = 1;
+            }
+        }
         changed(row);
 
         if (n > 0) {
@@ -374,8 +578,8 @@ void Downloader::onFinished(int exitCode, QProcess::ExitStatus status)
             emit notice(QStringLiteral("Downloaded ") + (n == 1 ? title : songs + QStringLiteral(" · ") + title));
     }
 
-    startNext();
-    if (!m_process)
-        emit busyChanged();
     emit countChanged();
+    if (nowIdle)
+        emit busyChanged();
+    startNext();
 }

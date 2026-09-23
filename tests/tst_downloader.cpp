@@ -145,6 +145,7 @@ private slots:
         m_downloader = new Downloader(m_library, m_temp, script.fileName(), this);
         QVERIFY(m_downloader->available());
         QCOMPARE(m_downloader->destination(), m_music + QStringLiteral("/YouTube"));
+        QCOMPARE(m_downloader->maxConcurrent(), 3);
     }
 
     void rejectsOtherLinks()
@@ -167,6 +168,14 @@ private slots:
         QCOMPARE(detail(0), QStringLiteral("1 song"));
         QCOMPARE(notices.size(), 1);
         QCOMPARE(notices.first().first().toString(), QStringLiteral("Downloaded One"));
+        // Per-track status: a single song lists one done row.
+        const QVariantList items =
+            m_downloader->jobItems(role(0, Downloader::JobId).toInt());
+        QCOMPARE(items.size(), 1);
+        QCOMPARE(items.first().toMap().value(QStringLiteral("title")).toString(),
+                 QStringLiteral("One"));
+        QCOMPARE(items.first().toMap().value(QStringLiteral("state")).toString(),
+                 QStringLiteral("done"));
 
         const QStringList a = args().split(u'\n');
         QVERIFY(a.contains(QStringLiteral("--no-playlist")));
@@ -190,6 +199,20 @@ private slots:
         QCOMPARE(role(0, Downloader::Title).toString(), QStringLiteral("Road trip"));
         QCOMPARE(detail(0), QStringLiteral("2 songs · 1 unavailable"));   // exit 1, but files came
         QVERIFY(args().split(u'\n').contains(QStringLiteral("--yes-playlist")));
+        // Per-track status: Two done, the missing video skipped, Three done.
+        const QVariantList items =
+            m_downloader->jobItems(role(0, Downloader::JobId).toInt());
+        QCOMPARE(items.size(), 3);
+        QCOMPARE(items.at(0).toMap().value(QStringLiteral("title")).toString(),
+                 QStringLiteral("Two"));
+        QCOMPARE(items.at(0).toMap().value(QStringLiteral("state")).toString(),
+                 QStringLiteral("done"));
+        QCOMPARE(items.at(1).toMap().value(QStringLiteral("state")).toString(),
+                 QStringLiteral("failed"));
+        QCOMPARE(items.at(2).toMap().value(QStringLiteral("title")).toString(),
+                 QStringLiteral("Three"));
+        QCOMPARE(items.at(2).toMap().value(QStringLiteral("state")).toString(),
+                 QStringLiteral("done"));
 
         QTRY_COMPARE(mixes.size(), 1);
         const qint64 mixId = mixes.first().at(0).toLongLong();
@@ -213,11 +236,13 @@ private slots:
 
     void queuesAndCancels()
     {
+        m_downloader->setMaxConcurrent(1);
+        QCOMPARE(m_downloader->maxConcurrent(), 1);
         QCOMPARE(m_downloader->add(QStringLiteral("https://www.youtube.com/watch?v=slow"), false), QString());
         QCOMPARE(m_downloader->add(QStringLiteral("https://www.youtube.com/watch?v=slow"), false),
                  QStringLiteral("Already downloading"));
         QCOMPARE(m_downloader->add(QStringLiteral("https://www.youtube.com/watch?v=song2"), false), QString());
-        // Newest first: the second job waits behind the slow one.
+        // Newest first with a single slot: the second job waits behind the slow one.
         QCOMPARE(state(0), QStringLiteral("queued"));
         QCOMPARE(detail(0), QStringLiteral("Waiting"));
         QTRY_COMPARE(detail(1), QStringLiteral("Slow"));
@@ -237,6 +262,42 @@ private slots:
         m_downloader->clearFinished();
         QCOMPARE(before, 5);
         QCOMPARE(m_downloader->rowCount(), 0);
+        m_downloader->setMaxConcurrent(3);
+    }
+
+    void downloadsInParallel()
+    {
+        m_downloader->setMaxConcurrent(2);
+        QCOMPARE(m_downloader->add(QStringLiteral("https://www.youtube.com/watch?v=slow"), false),
+                 QString());
+        QCOMPARE(m_downloader->add(QStringLiteral("https://www.youtube.com/watch?v=song3"), false),
+                 QString());
+        // Both slots run at once instead of queueing behind the slow job.
+        QTRY_COMPARE(state(1), QStringLiteral("running"));
+        QTRY_COMPARE(m_downloader->runningCount(), 2);
+        QVERIFY(m_downloader->busy());
+        QCOMPARE(state(0), QStringLiteral("running"));
+
+        // The quick song finishes while the slow one is still going.
+        const int slowId = role(1, Downloader::JobId).toInt();
+        const int quickId = role(0, Downloader::JobId).toInt();
+        QTRY_COMPARE(state(0), QStringLiteral("done"));
+        QCOMPARE(state(1), QStringLiteral("running"));
+        QCOMPARE(m_downloader->runningCount(), 1);
+        // Its per-track row is done too.
+        const QVariantList items = m_downloader->jobItems(quickId);
+        QCOMPARE(items.size(), 1);
+        QCOMPARE(items.first().toMap().value(QStringLiteral("state")).toString(),
+                 QStringLiteral("done"));
+
+        m_downloader->cancel(slowId);
+        QTRY_COMPARE(state(1), QStringLiteral("canceled"));
+        QVERIFY(!m_downloader->busy());
+        QCOMPARE(m_downloader->runningCount(), 0);
+
+        m_downloader->clearFinished();
+        QCOMPARE(m_downloader->rowCount(), 0);
+        m_downloader->setMaxConcurrent(3);
     }
 };
 

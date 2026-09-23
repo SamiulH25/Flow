@@ -104,8 +104,10 @@ Settings + saved queue: `~/.config/Flow/Flow.conf`.
   tags and a square-cropped cover into `<music folder>/YouTube/<artist>/<album>/`; the
   rescan picks them up. Playlists also become a mix in playlist order; albums
   (`browse/MPREb…`, `list=OLAK5uy…`) get track numbers and show up under Albums.
-  One job at a time, cancellable (kills yt-dlp's whole process group), unavailable
-  videos skipped. Work in progress lives in `~/.cache/Flow/Flow/yt-dlp/`. `watch?v=…&list=…`
+  Up to 3 jobs at once (QUEUE header steps 1–4), each cancellable (kills yt-dlp's
+  whole process group), unavailable videos skipped. Click a queued playlist to
+  expand its per-track status (queued / % / done / skipped). Work in progress
+  lives in `~/.cache/Flow/Flow/yt-dlp/`. `watch?v=…&list=…`
   links default to the song (they are often endless radios); PLAYLIST takes the list.
 
 Deliberately not in v1:
