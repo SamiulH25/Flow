@@ -12,7 +12,7 @@ endif()
 
 option(FLOW_BUILD_TESTS "Build the QtTest suite" ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick Multimedia Sql DBus)
+find_package(Qt6 REQUIRED COMPONENTS Quick Multimedia Sql DBus Network)
 find_package(taglib 2 REQUIRED CONFIG)
 
 include(GNUInstallDirs)
@@ -27,9 +27,10 @@ qt_add_library(flowcore STATIC
     src/playqueue.h src/playqueue.cpp
     src/m3u.h src/m3u.cpp
     src/ytdlp.h src/ytdlp.cpp
+    src/navidrome.h src/navidrome.cpp
 )
 target_include_directories(flowcore PUBLIC src)
-target_link_libraries(flowcore PUBLIC Qt6::Core Qt6::Sql TagLib::tag)
+target_link_libraries(flowcore PUBLIC Qt6::Core Qt6::Gui Qt6::Sql Qt6::Network TagLib::tag)
 
 qt_add_executable(flow
     src/main.cpp
@@ -48,7 +49,9 @@ qt_add_qml_module(flow
         src/library.h src/library.cpp
         src/player.h src/player.cpp
         src/waveform.h src/waveform.cpp
+        src/visualizer.h src/visualizer.cpp
         src/downloader.h src/downloader.cpp
+        src/enricher.h src/enricher.cpp
 )
 
 # Window icon, embedded so it also works uninstalled.
@@ -57,11 +60,22 @@ qt_add_resources(flow "icon" PREFIX "/" FILES data/flow.svg)
 # what happens to be installed.
 qt_add_resources(flow "fonts" PREFIX "/" FILES
     data/fonts/Inter.ttf data/fonts/SpaceGrotesk.ttf data/fonts/JetBrainsMono.ttf)
-
+target_link_libraries(flow PRIVATE flowcore Qt6::Quick Qt6::Multimedia Qt6::DBus Qt6::Network)
 target_compile_definitions(flow PRIVATE FLOW_VERSION="${PROJECT_VERSION}")
-target_link_libraries(flow PRIVATE flowcore Qt6::Quick Qt6::Multimedia Qt6::DBus)
 
-install(TARGETS flow RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# Headless front end: the same index, settings and yt-dlp backend, no window.
+# It drives the QML singletons (Library / Downloader / Enricher) directly, so it
+# links Qt6::Qml for their registrations but never starts an engine.
+qt_add_executable(flow-cli
+    src/cli.cpp
+    src/library.h src/library.cpp
+    src/enricher.h src/enricher.cpp
+    src/downloader.h src/downloader.cpp
+)
+target_link_libraries(flow-cli PRIVATE flowcore Qt6::Network Qt6::Qml)
+target_compile_definitions(flow-cli PRIVATE FLOW_VERSION="${PROJECT_VERSION}")
+
+install(TARGETS flow flow-cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 configure_file(data/flow.desktop.in ${CMAKE_CURRENT_BINARY_DIR}/flow.desktop @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/flow.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES data/flow.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
@@ -83,20 +97,46 @@ if(FLOW_BUILD_TESTS)
     target_link_libraries(tst_waveform PRIVATE Qt6::Multimedia Qt6::Test)
     add_test(NAME tst_waveform COMMAND tst_waveform)
 
-    qt_add_executable(tst_library tests/tst_library.cpp src/library.h src/library.cpp)
-    target_link_libraries(tst_library PRIVATE flowcore Qt6::Qml Qt6::Test)
+    qt_add_executable(tst_library tests/tst_library.cpp
+        src/library.h src/library.cpp src/enricher.h src/enricher.cpp)
+    target_link_libraries(tst_library PRIVATE flowcore Qt6::Network Qt6::Qml Qt6::Test)
     add_test(NAME tst_library COMMAND tst_library)
+
+    qt_add_executable(tst_visualizer tests/tst_visualizer.cpp src/visualizer.h src/visualizer.cpp)
+    target_include_directories(tst_visualizer PRIVATE src)
+    target_link_libraries(tst_visualizer PRIVATE Qt6::Multimedia Qt6::Test)
+    add_test(NAME tst_visualizer COMMAND tst_visualizer)
+
+    # Enrichment against a fake backend: matching, storing, and the queue's
+    # pacing all work without a network connection.
+    qt_add_executable(tst_enricher tests/tst_enricher.cpp
+        src/library.h src/library.cpp src/enricher.h src/enricher.cpp)
+    target_link_libraries(tst_enricher PRIVATE flowcore Qt6::Network Qt6::Qml Qt6::Test)
+    add_test(NAME tst_enricher COMMAND tst_enricher)
+    set_tests_properties(tst_enricher PROPERTIES TIMEOUT 120)
+
 
     # Download jobs against a fake yt-dlp (a shell script), so no network is needed.
     qt_add_executable(tst_downloader tests/tst_downloader.cpp
-        src/library.h src/library.cpp src/downloader.h src/downloader.cpp)
-    target_link_libraries(tst_downloader PRIVATE flowcore Qt6::Qml Qt6::Test)
+        src/library.h src/library.cpp src/enricher.h src/enricher.cpp
+        src/downloader.h src/downloader.cpp)
+    target_link_libraries(tst_downloader PRIVATE flowcore Qt6::Network Qt6::Qml Qt6::Test)
     add_test(NAME tst_downloader COMMAND tst_downloader)
+
+    # The headless front end (flow-cli) run as a real process against the same
+    # fake yt-dlp: argument handling, exit codes and the JSON it promises.
+    qt_add_executable(tst_cli tests/tst_cli.cpp)
+    target_compile_definitions(tst_cli PRIVATE FLOW_CLI_BIN="$<TARGET_FILE:flow-cli>")
+    target_link_libraries(tst_cli PRIVATE flowcore Qt6::Test)
+    add_dependencies(tst_cli flow-cli)
+    add_test(NAME tst_cli COMMAND tst_cli)
+    set_tests_properties(tst_cli PROPERTIES TIMEOUT 300)
 
     # Integration: real scan + QMediaPlayer playback (plays a few seconds of silence).
     qt_add_executable(tst_player tests/tst_player.cpp
-        src/library.h src/library.cpp src/player.h src/player.cpp src/waveform.h src/waveform.cpp)
-    target_link_libraries(tst_player PRIVATE flowcore Qt6::Multimedia Qt6::Qml Qt6::Test)
+        src/library.h src/library.cpp src/player.h src/player.cpp src/waveform.h src/waveform.cpp
+        src/visualizer.h src/visualizer.cpp src/enricher.h src/enricher.cpp)
+    target_link_libraries(tst_player PRIVATE flowcore Qt6::Network Qt6::Multimedia Qt6::Qml Qt6::Test)
     add_test(NAME tst_player COMMAND tst_player)
     set_tests_properties(tst_player PROPERTIES TIMEOUT 90)
 
@@ -104,10 +144,20 @@ if(FLOW_BUILD_TESTS)
     find_program(DBUS_RUN_SESSION dbus-run-session)
     qt_add_executable(tst_mpris tests/tst_mpris.cpp
         src/library.h src/library.cpp src/player.h src/player.cpp src/waveform.h src/waveform.cpp
+        src/visualizer.h src/visualizer.cpp
+        src/enricher.h src/enricher.cpp
         src/mpris.h src/mpris.cpp)
-    target_link_libraries(tst_mpris PRIVATE flowcore Qt6::Multimedia Qt6::Qml Qt6::DBus Qt6::Test)
+    target_link_libraries(tst_mpris PRIVATE flowcore Qt6::Network Qt6::Multimedia Qt6::Qml Qt6::DBus Qt6::Test)
     if(DBUS_RUN_SESSION)
         add_test(NAME tst_mpris COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:tst_mpris>)
         set_tests_properties(tst_mpris PROPERTIES TIMEOUT 90)
     endif()
+
+    # Navidrome: token and URL rules, a sync against an in-process Subsonic server,
+    # and the library index that the sync feeds. No real server is needed.
+    qt_add_executable(tst_navidrome tests/tst_navidrome.cpp
+        src/library.h src/library.cpp src/enricher.h src/enricher.cpp)
+    target_link_libraries(tst_navidrome PRIVATE flowcore Qt6::Network Qt6::Qml Qt6::Test)
+    add_test(NAME tst_navidrome COMMAND tst_navidrome)
+    set_tests_properties(tst_navidrome PROPERTIES TIMEOUT 120)
 endif()

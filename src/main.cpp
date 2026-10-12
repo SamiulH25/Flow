@@ -1,4 +1,5 @@
 #include "downloader.h"
+#include "enricher.h"
 #include "library.h"
 #include "mpris.h"
 #include "player.h"
@@ -74,9 +75,12 @@ int main(int argc, char *argv[])
                     cacheDir + QStringLiteral("/covers"));
     Player player(&library);
     Downloader downloader(&library, cacheDir + QStringLiteral("/yt-dlp"));
+    Enricher enricher(&library);
+    library.setEnricher(&enricher);
     Library::setInstance(&library);
     Player::setInstance(&player);
     Downloader::setInstance(&downloader);
+    Enricher::setInstance(&enricher);
 
     QQmlApplicationEngine engine;
     QObject::connect(

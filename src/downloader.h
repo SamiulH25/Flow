@@ -44,6 +44,7 @@ public:
         IsPlaylist,
         Items,      // QVariantList of {index, title, artist, state, progress}
         ItemCount,
+        Eta,        // seconds remaining over the whole job, -1 when unknown
     };
 
     // `program` overrides the yt-dlp found on PATH (tests use a fake one);
@@ -97,6 +98,10 @@ private:
         qreal progress = 0;
         QString file;
     };
+    struct Sample {
+        qint64 ms = 0;
+        qreal progress = 0;
+    };
     struct Job {
         int id = 0;
         QString url;
@@ -113,6 +118,7 @@ private:
         bool canceled = false;
         QString outcome;
         QList<ItemStatus> items;   // per-track status, in index order
+        QList<Sample> samples;   // (time, overall progress) history, for eta
     };
     struct Running {
         QProcess *process = nullptr;
@@ -123,6 +129,9 @@ private:
 
     int rowOf(int jobId) const;
     void changed(int row);
+    static qreal overallProgress(const Job &job);
+    static int etaSeconds(const Job &job);
+    static void recordSample(Job &job);
     static QVariantList itemsVariant(const Job &job);
     ItemStatus *findItem(Job &job, int index);
     void ensureItems(Job &job, int count);

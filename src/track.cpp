@@ -1,4 +1,5 @@
 #include "track.h"
+#include "navidrome.h"
 
 #include <QUrl>
 
@@ -67,7 +68,9 @@ QHash<int, QByteArray> names()
         {Id, "ti"},        {Title, "t"},    {Artist, "a"},   {Album, "al"},
         {Duration, "d"},   {Seconds, "s"},  {Format, "f"},   {Spec, "khz"},
         {Bitrate, "br"},   {HiRes, "hi"},   {Color1, "c1"},  {Color2, "c2"},
-        {Cover, "cover"},  {Liked, "liked"},
+        {Cover, "cover"},  {Liked, "liked"},  {Genre, "g"},  {Enriched, "en"},
+        {Year, "yr"},
+        {Remote, "rm"},
     };
 }
 
@@ -90,6 +93,10 @@ QVariant value(const Track &t, int role)
     case Cover:
         return t.coverPath.isEmpty() ? QString() : QUrl::fromLocalFile(t.coverPath).toString();
     case Liked: return t.liked;
+    case Genre: return t.enriched.genre;
+    case Enriched: return t.isEnriched();
+    case Year: return t.year;
+    case Remote: return Navidrome::isRemotePath(t.path);
     }
     return {};
 }

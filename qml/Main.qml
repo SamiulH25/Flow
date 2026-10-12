@@ -27,7 +27,7 @@ ApplicationWindow {
     readonly property color ink: "#f4f1ea"
     readonly property color mut: "#9b978c"
     readonly property color dim: "#5e5c55"
-    readonly property color acc: "#d9ff3d"
+    readonly property color acc: Library.accentFor(cur.cover) || "#d9ff3d"   // follows the cover; mint when there is none
     readonly property color soft: "#cfccc2"
     readonly property color danger: "#ff8a7a"
     readonly property string disp: "Space Grotesk"    // bundled, see main.cpp
@@ -48,10 +48,17 @@ ApplicationWindow {
     property bool albumsFromGrid: false  // where BACK from an album returns to
     property bool railOpen: false        // narrow windows: rail shown as an overlay
     property bool drawerOpen: false      // medium windows: drawer shown as a slide-over
+    property bool denseRows: false       // track list density; remembered between runs
+    Settings { category: "view"; property alias denseRows: root.denseRows }
 
     function fmtTime(s) {
         s = Math.max(0, Math.floor(s));
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    }
+    function fmtEta(s) {
+        if (s >= 3600) return Math.floor(s / 3600) + "h " + String(Math.floor(s % 3600 / 60)).padStart(2, "0") + "m";
+        if (s >= 60) return Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s";
+        return s + "s";
     }
     function goTo(k) {
         railOpen = false;
@@ -110,23 +117,30 @@ ApplicationWindow {
                 x: art.accentX; y: art.accentY
             }
         }
-        Image {
-            id: img
+        // Fades in when a cover loads and out when its source changes.
+        Item {
+            id: artImgs
             anchors.fill: parent
-            source: art.source
-            sourceSize: Qt.size(art.decodeSize, art.decodeSize)
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true; cache: true
-            visible: art.loaded && !art.masked
-        }
-        MultiEffect {
-            anchors.fill: parent
-            source: img
-            visible: art.loaded && art.masked
-            maskEnabled: true
-            maskSource: artMask
-            maskThresholdMin: 0.5
-            maskSpreadAtMin: 1.0
+            opacity: art.loaded ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+            Image {
+                id: img
+                anchors.fill: parent
+                source: art.source
+                sourceSize: Qt.size(art.decodeSize, art.decodeSize)
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true; cache: true
+                visible: !art.masked
+            }
+            MultiEffect {
+                anchors.fill: parent
+                source: img
+                visible: art.masked
+                maskEnabled: true
+                maskSource: artMask
+                maskThresholdMin: 0.5
+                maskSpreadAtMin: 1.0
+            }
         }
         Item {
             id: artMask
@@ -135,6 +149,19 @@ ApplicationWindow {
             visible: false
             Rectangle { anchors.fill: parent; radius: art.radius; color: "black" }
         }
+    }
+
+    // Volume slider: drag or scroll. Shared by the dock and its narrow-window popup.
+    component VolumeBar: Item {
+        width: 90; height: 16
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: "#26262e" }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width * Player.volume; height: 4; radius: 2; color: "#d8d5cb" }
+        MouseArea {
+            anchors.fill: parent
+            onPressed: mouse => Player.volume = mouse.x / width
+            onPositionChanged: mouse => { if (pressed) Player.volume = mouse.x / width; }
+        }
+        WheelHandler { onWheel: event => Player.volume = Player.volume + (event.angleDelta.y > 0 ? 0.05 : -0.05) }
     }
 
     // "Now playing" marker: three bars that dance while playing, rest when paused.
@@ -208,9 +235,12 @@ ApplicationWindow {
     component AlbumCard: Item {
         id: card
         property bool fromGrid: false
+        readonly property bool playingNow: Player.hasTrack && Library.albumTrackIds(albumIndex).indexOf(Player.currentId) >= 0
         height: width + 58
         Art {
             width: card.width; height: card.width
+            scale: cardHover.containsMouse ? 1.03 : 1; transformOrigin: Item.Center
+            Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
             source: cover; c1: model.c1; c2: model.c2
             accentSize: width * 0.5; accentX: (albumIndex % 3) * width * 0.22 - 8; accentY: (albumIndex % 2) * width * 0.26 - 10
             decodeSize: 300
@@ -224,6 +254,7 @@ ApplicationWindow {
         }
         Text { y: card.width + 7; width: card.width; text: al; color: ink; font.pixelSize: 13; font.family: disp; font.weight: Font.Medium; elide: Text.ElideRight }
         Text { y: card.width + 26; width: card.width; text: khz !== "" ? a + " · " + khz : a; color: mut; font.pixelSize: 12; elide: Text.ElideRight }
+        Text { y: card.width + 44; width: card.width; text: (yr > 0 ? yr + " · " : "") + count + (count === 1 ? " track" : " tracks"); color: dim; font.pixelSize: 10; font.family: mono; elide: Text.ElideRight }
         MouseArea {
             id: cardHover
             anchors.fill: parent; hoverEnabled: true
@@ -231,9 +262,10 @@ ApplicationWindow {
         }
         Rectangle {
             x: card.width - 44; y: card.width - 44; width: 36; height: 36; radius: 18
-            visible: cardHover.containsMouse || playHover.containsMouse
+            visible: cardHover.containsMouse || playHover.containsMouse || card.playingNow
             color: playHover.containsMouse ? ink : acc
-            Icon { anchors.centerIn: parent; anchors.horizontalCenterOffset: 1; name: "play"; size: 16; color: "#000" }
+            Icon { visible: !card.playingNow || playHover.containsMouse; anchors.centerIn: parent; anchors.horizontalCenterOffset: 1; name: "play"; size: 16; color: "#000" }
+            EqBars { visible: card.playingNow && !playHover.containsMouse; anchors.centerIn: parent; color: "#000" }
             MouseArea { id: playHover; anchors.fill: parent; hoverEnabled: true; onClicked: Player.playTracks(Library.albumTrackIds(albumIndex), 0) }
         }
     }
@@ -280,6 +312,9 @@ ApplicationWindow {
         id: trackMenu
         property var trackId: -1
         property int slot: -1
+        // The menu's own state follows the row it was opened from.
+        readonly property bool enriched: trackMenu.enrichedId > 0
+        property int enrichedId: -1
         padding: 6
         background: Rectangle { implicitWidth: 200; color: panel; border.color: line2; border.width: 1; radius: 10 }
         FlowMenuItem { text: "Play next"; onTriggered: Player.playNext(trackMenu.trackId) }
@@ -291,6 +326,18 @@ ApplicationWindow {
         FlowMenuItem {
             text: "Remove from mix"; visible: Library.viewKind === "mix"
             onTriggered: Library.removeFromMix(Library.viewMixId, trackMenu.slot)
+        }
+        FlowMenuItem {
+            text: trackMenu.enriched ? "Refresh from MusicBrainz" : "Enrich from MusicBrainz"
+            onTriggered: Enricher.enrich(trackMenu.trackId, trackMenu.enriched)
+        }
+        FlowMenuItem {
+            text: "Enrich everything in view"; visible: Library.shownCount > 0
+            onTriggered: {
+                const n = Library.shownCount
+                Library.enrichShown()
+                showToast("Looking up " + n + " track" + (n === 1 ? "" : "s") + " on MusicBrainz…")
+            }
         }
     }
 
@@ -340,6 +387,51 @@ ApplicationWindow {
     property bool toastShown: false
     function showToast(text) { toast.text = text; toastShown = true; toastTimer.restart(); }
     Timer { id: toastTimer; interval: 3500; onTriggered: toastShown = false }
+
+    // ---- Navidrome: server, user and password. Tracks stream; nothing is copied to disk ----
+    component NavField: TextField {
+        width: parent.width; height: 38; leftPadding: 12; rightPadding: 12
+        color: ink; font.pixelSize: 13; placeholderTextColor: dim; selectByMouse: true
+        background: Rectangle { radius: 9; color: "#1a1a20"; border.color: parent.activeFocus ? line2 : line; border.width: 1 }
+    }
+    Popup {
+        id: navidromeDialog
+        anchors.centerIn: Overlay.overlay
+        modal: true
+        width: Math.min(root.width - 48, 420)
+        padding: 20
+        background: Rectangle { radius: 12; color: panel; border.color: line2; border.width: 1 }
+        onOpened: {
+            navUrl.text = Library.navidromeUrl;
+            navUser.text = Library.navidromeUser;
+            navPass.text = "";
+            navUrl.forceActiveFocus();
+        }
+        function submit() {
+            Library.setNavidrome(navUrl.text.trim(), navUser.text.trim(), navPass.text);
+            navPass.text = "";
+            close();
+        }
+        contentItem: Column {
+            width: navidromeDialog.width - 40
+            spacing: 10
+            Text { text: "Navidrome server"; color: ink; font.pixelSize: 15; font.bold: true }
+            Text {
+                width: parent.width; wrapMode: Text.WordWrap; color: mut; font.pixelSize: 11
+                text: "Flow streams the library over the Subsonic API; nothing is copied to disk. The password is saved in Flow's settings file, which only you can read."
+            }
+            NavField { id: navUrl; placeholderText: "https://music.example.com"; onAccepted: navUser.forceActiveFocus() }
+            NavField { id: navUser; placeholderText: "User name"; onAccepted: navPass.forceActiveFocus() }
+            NavField { id: navPass; placeholderText: "Password"; echoMode: TextInput.Password; onAccepted: navidromeDialog.submit() }
+            Row {
+                spacing: 8
+                Pill { text: "SAVE & SYNC"; onClicked: navidromeDialog.submit() }
+                Pill { text: "SYNC NOW"; visible: Library.navidromeUrl !== ""; onClicked: Library.navidromeSync() }
+                Pill { text: "FORGET"; visible: Library.navidromeUrl !== ""; onClicked: { Library.navidromeForget(); navidromeDialog.close(); } }
+            }
+            Text { width: parent.width; wrapMode: Text.WordWrap; color: mut; font.pixelSize: 11; text: Library.navidromeStatus }
+        }
+    }
 
     // ================= header =================
     Rectangle {
@@ -407,6 +499,27 @@ ApplicationWindow {
                 visible: parent.width >= 300 && !searchField.activeFocus
                 Text { id: hintLabel; anchors.centerIn: parent; text: "Ctrl K"; color: dim; font.pixelSize: 9; font.family: mono }
             }
+        }
+        // Medium windows hide the drawer; show what is playing here when the search leaves room.
+        Row {
+            id: ticker
+            readonly property real room: chrome.width - 58 - (searchBox.x + searchBox.width) - 16
+            anchors { right: parent.right; rightMargin: 58; verticalCenter: parent.verticalCenter }
+            spacing: 8
+            visible: mid && !drawerOpen && Player.hasTrack && room >= 120
+            EqBars { anchors.verticalCenter: parent.verticalCenter }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, Math.max(0, ticker.room - 22))
+                text: cur.t + (cur.a !== "" ? " — " + cur.a : "")
+                color: ink; font.pixelSize: 12; font.family: disp; font.weight: Font.Medium; elide: Text.ElideRight
+            }
+        }
+        MouseArea {
+            anchors.fill: ticker
+            enabled: ticker.visible
+            cursorShape: Qt.PointingHandCursor
+            onClicked: openDrawer("now")
         }
         Rectangle {
             anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 16 }
@@ -590,6 +703,21 @@ ApplicationWindow {
                             }
                         }
                     }
+                    Item { width: 1; height: 12 }
+                    Rectangle {
+                        width: parent.width; height: 92; radius: 11; color: panel; border.color: navHover.containsMouse ? line2 : line; border.width: 1
+                        MouseArea { id: navHover; anchors.fill: parent; hoverEnabled: true; onClicked: navidromeDialog.open() }
+                        Column {
+                            anchors { fill: parent; margins: 12 } spacing: 4
+                            Item {
+                                width: parent.width; height: navTitle.implicitHeight
+                                Text { id: navTitle; text: "Navidrome"; color: ink; font.pixelSize: 12; font.bold: true }
+                                Text { anchors.right: parent.right; text: Library.navidromeUrl === "" ? "CONNECT" : "EDIT"; color: navHover.containsMouse ? ink : dim; font.pixelSize: 10; font.family: mono }
+                            }
+                            Text { width: parent.width; text: Library.navidromeUrl === "" ? "Stream a Subsonic / Navidrome library" : Library.navidromeUrl; color: mut; font.pixelSize: 11; font.family: mono; elide: Text.ElideMiddle }
+                            Text { width: parent.width; text: Library.navidromeSyncing ? "Syncing…" : Library.navidromeStatus; color: mut; font.pixelSize: 11; elide: Text.ElideRight }
+                        }
+                    }
                 }
             }
         }
@@ -685,6 +813,13 @@ ApplicationWindow {
                             const modes = ["def", "title", "artist", "dur"];
                             Library.sortMode = modes[(modes.indexOf(Library.sortMode) + 1) % modes.length];
                         } }
+                    }
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        height: 30; width: densityLabel.implicitWidth + 26; radius: 9
+                        color: densityHover.containsMouse ? "#1a1a20" : panel; border.color: line2; border.width: 1
+                        Text { id: densityLabel; anchors.centerIn: parent; color: ink; font.pixelSize: 11; font.family: mono; text: root.denseRows ? "Dense" : "Comfy" }
+                        MouseArea { id: densityHover; anchors.fill: parent; hoverEnabled: true; onClicked: root.denseRows = !root.denseRows }
                     }
                     Pill {
                         anchors.verticalCenter: parent.verticalCenter
@@ -879,7 +1014,7 @@ ApplicationWindow {
                                     spacing: 4
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
-                                        text: status === "running" ? Math.floor(progress * 100) + "%" : status.toUpperCase()
+                                        text: status === "running" ? Math.floor(progress * 100) + "%" + (eta >= 0 ? "  ·  " + root.fmtEta(eta) + " left" : "") : status.toUpperCase()
                                         color: status === "running" ? acc : status === "failed" ? danger : dim
                                         font.pixelSize: 10; font.family: mono
                                     }
@@ -983,6 +1118,8 @@ ApplicationWindow {
                 property int dragFrom: -1
                 property int dropAt: -1
 
+                // Row height follows the density toggle (root.denseRows).
+                readonly property real rowH: root.denseRows ? 42 : 56
                 // One column grid shared by the header and every row.
                 readonly property real pad: 12
                 readonly property real numW: 26
@@ -1030,7 +1167,7 @@ ApplicationWindow {
 
                 delegate: Rectangle {
                     id: trackRow
-                    width: trackList.width; height: 56; radius: 9
+                    width: trackList.width; height: trackList.rowH; radius: 9
                     readonly property bool isCur: ti === Player.currentId
                     readonly property bool hovered: rowHover.containsMouse || actionsHover.hovered || handleArea.containsMouse || likeArea.containsMouse
                     color: isCur ? "#151a0e" : hovered ? "#141419" : "transparent"
@@ -1067,7 +1204,7 @@ ApplicationWindow {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 2
                         Text { width: parent.width; text: t; color: trackRow.isCur ? acc : ink; font.pixelSize: 13; font.family: disp; font.weight: Font.Medium; elide: Text.ElideRight }
-                        Text { width: parent.width; text: a; color: mut; font.pixelSize: 12; elide: Text.ElideRight }
+                        Text { width: parent.width; text: rm ? a + "  ·  stream" : a; color: mut; font.pixelSize: 12; elide: Text.ElideRight }
                     }
                     Text {
                         // hidden under the hover actions rather than peeking out beside them
@@ -1078,7 +1215,6 @@ ApplicationWindow {
                     Text {
                         x: trackList.xTime; width: trackList.timeW; horizontalAlignment: Text.AlignRight
                         anchors.verticalCenter: parent.verticalCenter
-                        visible: !actions.visible
                         text: d; color: mut; font.pixelSize: 12; font.family: mono
                     }
                     Item {
@@ -1112,8 +1248,8 @@ ApplicationWindow {
                     Rectangle {
                         id: actions
                         visible: trackRow.hovered && trackList.dragFrom < 0
-                        anchors { right: parent.right; rightMargin: trackList.pad + trackList.heartW + 4; verticalCenter: parent.verticalCenter }
-                        width: actionRow.implicitWidth + 16; height: 40; radius: 8
+                        anchors { right: parent.right; rightMargin: trackList.pad + trackList.heartW + trackList.timeW + 12; verticalCenter: parent.verticalCenter }
+                        width: actionRow.implicitWidth + 16; height: Math.min(40, trackList.rowH - 4); radius: 8
                         color: trackRow.color === "transparent" ? "#141419" : trackRow.color
                         HoverHandler { id: actionsHover }
                         Row {
@@ -1139,7 +1275,12 @@ ApplicationWindow {
                             IconButton {
                                 visible: !trackList.inlineActions
                                 width: 30; height: 30; icon: "more"; iconSize: 16; tip: "More"
-                                onClicked: { trackMenu.trackId = ti; trackMenu.slot = slot; trackMenu.popup(); }
+                                onClicked: {
+                        trackMenu.trackId = ti
+                        trackMenu.slot = slot
+                        trackMenu.enrichedId = en ? ti : -1
+                        trackMenu.popup()
+                    }
                             }
                         }
                     }
@@ -1187,6 +1328,15 @@ ApplicationWindow {
             z: 10
             color: panel
             Rectangle { anchors { top: parent.top; bottom: parent.bottom; left: parent.left } width: 1; color: line }
+            // sliding highlight behind the active tab
+            Rectangle {
+                id: tabIndicator
+                readonly property int slot: drawerTab === "queue" ? 1 : drawerTab === "lyrics" ? 2 : 0
+                x: tabs.x + slot * (width + 4); y: tabs.y
+                width: (tabs.width - 8) / 3; height: 34
+                radius: 9; color: panel2; border.color: line; border.width: 1
+                Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+            }
             Row {
                 id: tabs
                 anchors { top: parent.top; left: parent.left; right: parent.right; topMargin: 12; leftMargin: 12; rightMargin: mid ? 50 : 12 }
@@ -1195,8 +1345,8 @@ ApplicationWindow {
                     model: [{t: "NOW", k: "now"}, {t: "QUEUE", k: "queue"}, {t: "LYRICS", k: "lyrics"}]
                     Rectangle {
                         width: (tabs.width - 8) / 3; height: 34
-                        radius: 9; color: drawerTab === modelData.k ? panel2 : tabHover.containsMouse ? "#17171c" : "transparent"
-                        border.color: drawerTab === modelData.k ? line : "transparent"; border.width: 1
+                        radius: 9; color: tabHover.containsMouse && drawerTab !== modelData.k ? "#17171c" : "transparent"
+                        border.color: "transparent"; border.width: 1
                         Text { anchors.centerIn: parent; color: drawerTab === modelData.k ? ink : dim; font.pixelSize: 10; font.family: mono
                             text: modelData.k === "queue" && Player.queueCount > 0 ? modelData.t + " · " + Player.queueCount : modelData.t }
                         MouseArea { id: tabHover; anchors.fill: parent; hoverEnabled: true; onClicked: drawerTab = modelData.k }
@@ -1239,6 +1389,37 @@ ApplicationWindow {
                             }
                         }
                     }
+                    // What the web lookup knows, and what the player measured.
+                    Flow {
+                        width: parent.width; spacing: 6
+                        visible: Player.hasTrack
+                        Repeater {
+                            model: [cur.g, cur.yr > 0 ? String(cur.yr) : "",
+                                    Player.loudnessText].filter(s => s !== "")
+                            Rectangle {
+                                height: 24; width: metaChip.implicitWidth + 16; radius: 7
+                                color: "#131318"; border.color: line2; border.width: 1
+                                Text { id: metaChip; anchors.centerIn: parent; text: modelData
+                                    font.pixelSize: 10; font.family: mono; color: soft }
+                            }
+                        }
+                        // The lookup, right where the gaps it fills are visible.
+                        Rectangle {
+                            height: 24; width: enrichChip.implicitWidth + 16; radius: 7
+                            visible: Player.hasTrack && cur.en !== true
+                            color: "#131318"; border.color: line2; border.width: 1
+                            Text { id: enrichChip; anchors.centerIn: parent
+                                text: Enricher.busy ? "ENRICHING " + Enricher.pending + "…" : "＋ ENRICH METADATA"
+                                font.pixelSize: 10; font.family: mono; color: acc }
+                            MouseArea {
+                                anchors.fill: parent; hoverEnabled: true
+                                onClicked: {
+                                    Enricher.enrich(Player.currentId)
+                                    showToast("Looking up this track on MusicBrainz…")
+                                }
+                            }
+                        }
+                    }
                     Text {
                         width: parent.width; visible: Player.error !== ""; text: Player.error
                         color: danger; font.pixelSize: 11; wrapMode: Text.WordWrap
@@ -1270,6 +1451,67 @@ ApplicationWindow {
                             }
                         }
                         MouseArea { anchors.fill: parent; onClicked: mouse => Player.seek(Player.duration * (mouse.x / width)) }
+                    }
+                    // Live analysis of what is actually coming out: 48 bands
+                    // with the raw waveform under them. Resting state is an
+                    // empty box, so it only shows while something plays.
+                    Item {
+                        id: vizArea
+                        // Gentle auto-gain: a quiet mix still draws a trace,
+                        // but never more than 8x, so silence stays flat.
+                        function gain() {
+                            const s = Player.scope
+                            let m = 0
+                            for (let i = 0; i < s.length; i += 2) {
+                                m = Math.max(m, Math.abs(s[i]), Math.abs(s[i + 1]))
+                            }
+                            return m > 0.12 ? Math.min(8, 1 / m) : 1
+                        }
+                        width: parent.width
+                        height: Player.hasTrack ? 100 : 0
+                        visible: height > 0
+                        clip: true
+                        Rectangle { anchors.fill: parent; radius: 10; color: "#0a0a0d"; border.color: line; border.width: 1 }
+                        Item {
+                            id: bands
+                            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 8; topMargin: 8 }
+                            height: 52
+                            readonly property real step: (width + 2) / 48
+                            Repeater {
+                                model: 48
+                                Rectangle {
+                                    readonly property real level: Player.spectrum.length === 48 ? Player.spectrum[index] : 0
+                                    x: index * bands.step
+                                    width: Math.max(1, bands.step - 2)
+                                    height: Math.max(1, level * bands.height)
+                                    anchors.bottom: parent.bottom
+                                    color: acc
+                                    opacity: level > 0.015 ? 0.35 + 0.65 * level : 0.12
+                                }
+                            }
+                        }
+                        Rectangle { anchors { left: parent.left; right: parent.right; top: bands.bottom; topMargin: 4; leftMargin: 8; rightMargin: 8 }
+                            height: 1; color: line }
+                        Item {
+                            id: scope
+                            anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 8; rightMargin: 8; bottomMargin: 8 }
+                            height: 28
+                            readonly property real step: (width + 1) / 96
+                            readonly property real gain: vizArea.gain()
+                            Repeater {
+                                model: 96
+                                Rectangle {
+                                    readonly property real lo: (Player.scope.length === 192 ? Player.scope[index * 2] : 0) * scope.gain
+                                    readonly property real hi: (Player.scope.length === 192 ? Player.scope[index * 2 + 1] : 0) * scope.gain
+                                    x: index * scope.step
+                                    width: Math.max(1, scope.step - 1)
+                                    height: Math.max(1, (hi - lo) * 14)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: mut
+                                    opacity: hi - lo > 0.02 ? 0.85 : 0.18
+                                }
+                            }
+                        }
                     }
                     Text { text: "UP NEXT"; color: dim; font.pixelSize: 10; font.family: mono; visible: upNext.count > 0 }
                     Repeater {
@@ -1382,12 +1624,17 @@ ApplicationWindow {
                 highlightRangeMode: ListView.ApplyRange
                 preferredHighlightBegin: height * 0.3
                 preferredHighlightEnd: height * 0.45
-                highlightMoveDuration: 350
+                highlightMoveDuration: 500
                 delegate: Text {
-                    width: ListView.view.width; text: modelData.text; font.pixelSize: 15; font.family: disp
+                    width: ListView.view.width; text: modelData.text; font.family: disp
                     wrapMode: Text.WordWrap; padding: 6
+                    readonly property bool isCurrent: Player.lyricsTimed && index === Player.lyricIndex
+                    font.pixelSize: isCurrent ? 20 : 15
+                    font.weight: isCurrent ? Font.DemiBold : Font.Normal
                     color: !Player.lyricsTimed ? soft
-                         : index === Player.lyricIndex ? ink : index < Player.lyricIndex ? mut : dim
+                         : isCurrent ? ink : index < Player.lyricIndex ? mut : dim
+                    opacity: !Player.lyricsTimed || isCurrent ? 1 : Math.max(0.3, 1 - 0.18 * Math.abs(index - Player.lyricIndex))
+                    Behavior on opacity { NumberAnimation { duration: 250 } }
                     MouseArea {
                         anchors.fill: parent; enabled: Player.lyricsTimed
                         onClicked: Player.seek(modelData.ms / 1000)
@@ -1426,8 +1673,21 @@ ApplicationWindow {
             id: seek
             anchors { top: parent.top; left: parent.left; right: parent.right; topMargin: 6; leftMargin: 16; rightMargin: 16 }
             height: 14
-            Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: seekArea.containsMouse ? 6 : 4; radius: 3; color: "#232329" }
-            Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width * progress; height: seekArea.containsMouse ? 6 : 4; radius: 3; color: acc }
+            // Real waveform once analysed; the played part lights up. A flat bar until then.
+            Repeater {
+                model: Player.peaks.length === 96 ? 96 : 0
+                Rectangle {
+                    readonly property real level: Player.peaks[index]
+                    x: index * seek.width / 96
+                    width: Math.max(1, seek.width / 96 - 1.5)
+                    height: Math.max(2, level * seek.height)
+                    anchors.verticalCenter: parent.verticalCenter
+                    radius: 1
+                    color: (index + 0.5) / 96 <= progress ? acc : seekArea.containsMouse ? "#3a3a44" : "#2a2a33"
+                }
+            }
+            Rectangle { visible: Player.peaks.length !== 96; anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: seekArea.containsMouse ? 6 : 4; radius: 3; color: "#232329" }
+            Rectangle { visible: Player.peaks.length !== 96; anchors.verticalCenter: parent.verticalCenter; width: parent.width * progress; height: seekArea.containsMouse ? 6 : 4; radius: 3; color: acc }
             MouseArea { id: seekArea; anchors.fill: parent; hoverEnabled: true; onClicked: mouse => Player.seek(Player.duration * (mouse.x / width)) }
         }
         // left: now playing (click opens the drawer's NOW tab)
@@ -1498,6 +1758,17 @@ ApplicationWindow {
             IconButton { anchors.verticalCenter: parent.verticalCenter; icon: "queue"; lit: drawerTab === "queue" && (!mid || drawerOpen); tip: "Queue"; onClicked: openDrawer("queue") }
             IconButton { anchors.verticalCenter: parent.verticalCenter; icon: "lyrics"; lit: drawerTab === "lyrics" && (!mid || drawerOpen); tip: "Lyrics"; onClicked: openDrawer("lyrics") }
         }
+        // wide docks keep the slider; narrower ones fold it into a popup
+        readonly property bool wideVol: dock.width - (transport.x + transport.width) > 250
+        Popup {
+            id: volPopup
+            parent: volBtn
+            x: (volBtn.width - width) / 2
+            y: -height - 10
+            width: 144; height: 40; padding: 12
+            background: Rectangle { color: panel; border.color: line2; border.width: 1; radius: 10 }
+            VolumeBar { width: 120; height: 16 }
+        }
         // right: time + volume
         Row {
             anchors { right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter; verticalCenterOffset: 6 }
@@ -1508,20 +1779,46 @@ ApplicationWindow {
                 visible: dock.width - (transport.x + transport.width) > implicitWidth + 40
                 text: fmtTime(Player.position) + " / " + fmtTime(Player.duration); color: mut; font.pixelSize: 11; font.family: mono
             }
-            Icon { anchors.verticalCenter: parent.verticalCenter; visible: vol.visible; name: "volume"; size: 16; color: mut }
-            Item {
-                id: vol
-                visible: dock.width - (transport.x + transport.width) > 250
-                anchors.verticalCenter: parent.verticalCenter; width: 90; height: 16
-                Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: "#26262e" }
-                Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width * Player.volume; height: 4; radius: 2; color: "#d8d5cb" }
+            Icon { anchors.verticalCenter: parent.verticalCenter; visible: dock.wideVol; name: "volume"; size: 16; color: mut }
+            VolumeBar { id: vol; visible: dock.wideVol; anchors.verticalCenter: parent.verticalCenter }
+            // narrow docks: the slider moves into a popup behind this button
+            IconButton {
+                id: volBtn
+                visible: !dock.wideVol
+                anchors.verticalCenter: parent.verticalCenter
+                icon: "volume"; iconSize: 16; tip: "Volume"
+                onClicked: volPopup.opened ? volPopup.close() : volPopup.open()
+            }
+            // Loudness matching: a player can only turn a track down, so this
+            // evens out the library by pulling the loud ones back to the level
+            // of the rest. The chip shows the gain it is applying right now.
+            Rectangle {
+                id: matchPill
+                anchors.verticalCenter: parent.verticalCenter
+                visible: Player.hasTrack && Player.loudnessText !== "" && !narrow
+                height: 22; width: matchLabel.implicitWidth + 16; radius: 7
+                color: Player.matchLoudness ? acc : "#131318"
+                border.color: Player.matchLoudness ? acc : line2; border.width: 1
+                Text {
+                    id: matchLabel; anchors.centerIn: parent
+                    text: Player.matchLoudness && Player.matchGain < 0.99
+                        ? "MATCH −" + Math.round(20 * Math.log10(Player.matchGain)) + " dB"
+                        : "MATCH"
+                    font.pixelSize: 10; font.family: mono
+                    color: Player.matchLoudness ? "#000" : soft
+                    font.bold: Player.matchLoudness
+                }
+                HoverHandler { id: matchHover }
                 MouseArea {
                     anchors.fill: parent
-                    onPressed: mouse => Player.volume = mouse.x / width
-                    onPositionChanged: mouse => { if (pressed) Player.volume = mouse.x / width; }
+                    onClicked: Player.matchLoudness = !Player.matchLoudness
                 }
-                WheelHandler { onWheel: event => Player.volume = Player.volume + (event.angleDelta.y > 0 ? 0.05 : -0.05) }
+                ToolTip {
+                    visible: matchHover.hovered
+                    text: Player.loudnessText + " — click to level this track with the rest"
+                    delay: 400
+                }
+                }
             }
         }
     }
-}

@@ -141,6 +141,54 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!failed.isEmpty(), 10000);
         QCOMPARE(failed.first().at(0).toLongLong(), 9);
     }
+
+    void dBLevelsAndMatchingGain()
+    {
+        // Full scale is 0 dBFS; silence has to land on the floor rather than on
+        // an infinity the panel cannot print.
+        QCOMPARE(Waveform::toDb(1.0), 0.0f);
+        QVERIFY(qAbs(Waveform::toDb(0.5) + 6.0206) < 0.01f);
+        QCOMPARE(Waveform::toDb(0.0), -90.0f);
+        QVERIFY(Waveform::toDb(-1.0) <= -90.0f);
+
+        // Matching pulls loud tracks down to the target and never pushes a
+        // quiet one up: a player cannot amplify past full scale.
+        QVERIFY(Waveform::matchGain(Waveform::kTargetDb - 1.0f) == 1.0f);
+        QVERIFY(Waveform::matchGain(-40.0f) == 1.0f);
+        const float gain = Waveform::matchGain(Waveform::kTargetDb + 6.0f);
+        QVERIFY(qAbs(gain - 0.5012f) < 0.01f);
+        QVERIFY(Waveform::matchGain(0.0f) < 0.2f);   // a brick-walled master
+    }
+
+    void measuresTheTrackItDraws()
+    {
+        // A square wave at half scale: RMS and peak both land near -6 dBFS.
+        const QString path = m_tmp.filePath(QStringLiteral("loud.wav"));
+        QVERIFY(writeWav(path, 44100, 2, [](int i, int) { return (i / 10) % 2 ? 0.5 : -0.5; }));
+        Waveform w;
+        QSignalSpy ready(&w, &Waveform::ready);
+        w.request(11, path);
+        QTRY_VERIFY_WITH_TIMEOUT(!ready.isEmpty(), 10000);
+        const float rmsDb = ready.first().at(2).toFloat();
+        const float peakDb = ready.first().at(3).toFloat();
+        QVERIFY2(qAbs(rmsDb + 6.0) < 1.0, qPrintable(QString::number(rmsDb)));
+        QVERIFY2(qAbs(peakDb + 6.0) < 1.0, qPrintable(QString::number(peakDb)));
+        // Half-scale content is above the target, so matching turns it down.
+        QVERIFY(Waveform::matchGain(rmsDb) < 1.0f);
+    }
+
+    void silenceMeasuresAsTheFloorNotAsFullScale()
+    {
+        const QString path = m_tmp.filePath(QStringLiteral("quiet.wav"));
+        QVERIFY(writeWav(path, 22050, 2, [](int, int) { return 0.0; }));
+        Waveform w;
+        QSignalSpy ready(&w, &Waveform::ready);
+        w.request(12, path);
+        QTRY_VERIFY_WITH_TIMEOUT(!ready.isEmpty(), 10000);
+        QCOMPARE(ready.first().at(2).toFloat(), -90.0f);
+        QCOMPARE(ready.first().at(3).toFloat(), -90.0f);
+        QCOMPARE(Waveform::matchGain(ready.first().at(2).toFloat()), 1.0f);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestWaveform)

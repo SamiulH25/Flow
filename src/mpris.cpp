@@ -104,7 +104,9 @@ QVariantMap Mpris::metadata() const
         m.insert(QStringLiteral("xesam:trackNumber"), t->trackNo);
     if (t->discNo > 0)
         m.insert(QStringLiteral("xesam:discNumber"), t->discNo);
-    m.insert(QStringLiteral("xesam:url"), QUrl::fromLocalFile(t->path).toString());
+    // A remote track has no file, and its stream URL carries the login token.
+    if (!Navidrome::isRemotePath(t->path))
+        m.insert(QStringLiteral("xesam:url"), QUrl::fromLocalFile(t->path).toString());
     if (!t->coverPath.isEmpty())
         m.insert(QStringLiteral("mpris:artUrl"), QUrl::fromLocalFile(t->coverPath).toString());
     return m;

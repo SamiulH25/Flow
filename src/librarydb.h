@@ -7,6 +7,8 @@
 #include <QSqlDatabase>
 #include <QString>
 
+#include <memory>
+
 // Thin wrapper around one SQLite connection to the library index.
 // A connection may only be used from the thread that opened it, so the
 // scanner thread and the GUI thread each own a LibraryDb.
@@ -40,6 +42,10 @@ public:
     bool setLiked(qint64 id, bool liked);
     QByteArray peaks(qint64 id);                      // empty when not computed
     bool setPeaks(qint64 id, const QByteArray &peaks);
+    bool setEnrichment(qint64 id, const Track::Enrichment &e);
+    Track::Enrichment enrichment(qint64 id);
+    // Loudness in dBFS (rms) and dBTP (peak), from the waveform pass.
+    bool setLoudness(qint64 id, float rmsDb, float peakDb);
 
     QList<Playlist> playlists();
     qint64 createPlaylist(const QString &name);   // -1 on failure
@@ -49,11 +55,18 @@ public:
 
     bool transaction();
     bool commit();
+    bool rollback();
 
 private:
     QSqlDatabase db() const;
     bool exec(const QString &sql);
     bool migrate();
+
+    // Hot statements (one per scanned file, one per waveform) prepared once and
+    // reused, instead of re-parsed by SQLite on every call. Held by pointer so
+    // they can be destroyed before the connection is removed.
+    struct Statements;
+    std::unique_ptr<Statements> m_stmts;
 
     QString m_name;
     QString m_error;

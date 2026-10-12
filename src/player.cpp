@@ -18,6 +18,11 @@ Player::Player(Library *library, QObject *parent)
     , m_queue(this)
 {
     m_player.setAudioOutput(&m_audio);
+    // Live PCM for the now-playing visualizer (ffmpeg backend only; without it
+    // the tap simply never fires and the analyser rests at zero).
+    m_player.setAudioBufferOutput(m_visualizer.output());
+
+    connect(&m_visualizer, &Visualizer::changed, this, &Player::visualizerChanged);
 
     const QSettings settings;
     m_volume = qBound(0.0, settings.value(QStringLiteral("player/volume"), 0.7).toDouble(), 1.0);
@@ -25,8 +30,8 @@ Player::Player(Library *library, QObject *parent)
     const int legacy = settings.value(QStringLiteral("player/repeat"), false).toBool() ? RepeatAll : RepeatOff;
     m_repeatMode = qBound(0, settings.value(QStringLiteral("player/repeatMode"), legacy).toInt(), 2);
     m_queue.setShuffled(settings.value(QStringLiteral("player/shuffle"), false).toBool());
-    m_audio.setVolume(QtAudio::convertVolume(float(m_volume), QtAudio::LogarithmicVolumeScale,
-                                             QtAudio::LinearVolumeScale));
+    m_matchLoudness = settings.value(QStringLiteral("player/matchLoudness"), false).toBool();
+    applyMatch();   // no track yet: sets the plain slider volume
 
     // queueChanged covers every edit so bindings on queueAt() stay fresh.
     connect(&m_queue, &PlayQueue::countChanged, this, &Player::queueChanged);
@@ -47,11 +52,15 @@ Player::Player(Library *library, QObject *parent)
     connect(m_library, &Library::trackUpdated, this, &Player::onTrackUpdated);
     connect(m_library, &Library::reloaded, this, &Player::onLibraryReloaded);
 
-    connect(&m_waveform, &Waveform::ready, this, [this](qint64 id, const QByteArray &bars) {
-        m_library->storePeaks(id, bars);
-        if (id == currentId())
-            setPeaks(bars);
-    });
+    connect(&m_waveform, &Waveform::ready, this,
+            [this](qint64 id, const QByteArray &bars, float rmsDb, float peakDb) {
+                m_library->storePeaks(id, bars);
+                m_library->storeLoudness(id, rmsDb, peakDb);
+                if (id == currentId()) {
+                    setPeaks(bars);
+                    applyMatch();
+                }
+            });
 
     // Save the queue shortly after edits (crash safety) and again on exit.
     m_saveQueueTimer.setSingleShot(true);
@@ -156,6 +165,7 @@ void Player::saveSettings() const
     settings.setValue(QStringLiteral("player/repeatMode"), m_repeatMode);
     settings.remove(QStringLiteral("player/repeat"));
     settings.setValue(QStringLiteral("player/shuffle"), m_queue.isShuffled());
+    settings.setValue(QStringLiteral("player/matchLoudness"), m_matchLoudness);
 }
 
 void Player::setVolume(qreal volume)
@@ -164,11 +174,56 @@ void Player::setVolume(qreal volume)
     if (qFuzzyCompare(volume + 1.0, m_volume + 1.0))
         return;
     m_volume = volume;
-    // The slider is perceptual; the output wants a linear gain.
-    m_audio.setVolume(QtAudio::convertVolume(float(volume), QtAudio::LogarithmicVolumeScale,
-                                             QtAudio::LinearVolumeScale));
+    applyMatch();
     saveSettings();
     emit volumeChanged();
+}
+
+float Player::outputVolume(qreal slider, float gain)
+{
+    // The slider is perceptual, the output wants a linear gain, so the slider
+    // has to be converted first and the matching gain then scales the linear
+    // result. Scaling the raw slider value *before* the conversion (as if the
+    // gain were a log-scale value) applies it on the wrong side of that curve:
+    // the attenuation comes out up to twice as deep as the panel reports, and
+    // past the knee of the curve the order flips, so a brick-walled master
+    // plays quieter than a track ten dB below the target.
+    const float linear = QtAudio::convertVolume(
+            float(qBound(0.0, slider, 1.0)),
+            QtAudio::LogarithmicVolumeScale, QtAudio::LinearVolumeScale);
+    return float(qBound(0.0, double(linear) * double(gain), 1.0));
+}
+
+void Player::applyMatch()
+{
+    // With loudness matching on, a track louder than the target is turned down
+    // to meet it — a player can never turn a track up past full scale, so quiet
+    // ones are left exactly where the user put them.
+    const Track *t = m_queue.current();
+    const float gain = (m_matchLoudness && t && t->hasLoudness()) ? Waveform::matchGain(t->rmsDb)
+                                                                  : 1.0f;
+    m_matchGain = gain;
+    m_audio.setVolume(outputVolume(m_volume, gain));
+    emit matchChanged();
+}
+
+void Player::setMatchLoudness(bool on)
+{
+    if (on == m_matchLoudness)
+        return;
+    m_matchLoudness = on;
+    applyMatch();
+    saveSettings();
+}
+
+QString Player::loudnessText() const
+{
+    const Track *t = m_queue.current();
+    if (!t || !t->hasLoudness())
+        return QString();
+    return QStringLiteral("%1 dBFS · peak %2")
+            .arg(t->rmsDb, 0, 'f', 1)
+            .arg(t->peakDb, 0, 'f', 1);
 }
 
 void Player::setShuffle(bool on)
@@ -218,13 +273,14 @@ void Player::loadCurrent(bool autoplay)
         m_loadedUid = uid;
         if (t->path != m_loadedPath) {
             m_loadedPath = t->path;
-            m_player.setSource(QUrl::fromLocalFile(t->path));
+            m_player.setSource(m_library->sourceUrl(*t));
         } else {
             m_player.setPosition(0);   // same file again (repeat / duplicate entry)
         }
     }
 
-    m_lyrics = t ? Lyrics::load(t->path) : Lyrics();
+    // Lyrics are read from a local sidecar or embedded tags; a remote track has neither.
+    m_lyrics = (t && !Navidrome::isRemotePath(t->path)) ? Lyrics::load(t->path) : Lyrics();
     m_lyricsList.clear();
     for (const Lyrics::Line &line : std::as_const(m_lyrics.lines))
         m_lyricsList.append(QVariantMap{{QStringLiteral("ms"), line.ms},
@@ -238,6 +294,7 @@ void Player::loadCurrent(bool autoplay)
     emit durationChanged();
     emit positionChanged();
     loadPeaks();
+    applyMatch();
 
     if (t && autoplay)
         m_player.play();
@@ -250,14 +307,17 @@ void Player::loadPeaks()
         setPeaks({});
         return;
     }
+    // A cached overview is not enough on its own: the same pass measures the
+    // track's loudness, so a track with bars but no numbers is decoded once.
     const QByteArray cached = m_library->cachedPeaks(t->id);
-    if (cached.size() == Waveform::kBars) {
+    if (cached.size() == Waveform::kBars)
         setPeaks(cached);
-        return;
+    else
+        setPeaks({});
+    if ((cached.size() != Waveform::kBars || !t->hasLoudness())
+        && m_waveform.pendingTrack() != t->id) {
+        m_waveform.request(t->id, m_library->sourceUrl(*t));
     }
-    setPeaks({});
-    if (m_waveform.pendingTrack() != t->id)
-        m_waveform.request(t->id, t->path);
 }
 
 void Player::setPeaks(const QByteArray &bars)

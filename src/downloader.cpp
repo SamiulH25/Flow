@@ -3,6 +3,7 @@
 #include "library.h"
 #include "ytdlp.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QJSEngine>
@@ -11,6 +12,7 @@
 
 #include <algorithm>
 #include <csignal>
+#include <limits>
 #include <unistd.h>
 
 Downloader::Downloader(Library *library, const QString &tempRoot, const QString &program,
@@ -87,21 +89,7 @@ QVariant Downloader::data(const QModelIndex &index, int role) const
             return job.item;
         return QString(job.url).remove(QRegularExpression(QStringLiteral("^https?://(www\\.)?")));
     case State: return job.state;
-    case Progress: {
-        if (job.state == u"done")
-            return 1.0;
-        if (!job.items.isEmpty()) {
-            double done = 0;
-            for (const ItemStatus &it : job.items) {
-                if (it.state == u"done")
-                    done += 1;
-                else if (it.state == u"downloading")
-                    done += qBound(0.0, it.progress, 1.0);
-            }
-            return done / double(job.items.size());
-        }
-        return job.count > 0 ? (job.index - 1 + job.itemProgress) / job.count : 0.0;
-    }
+    case Progress: return overallProgress(job);
     case Detail:
         if (job.state == u"queued") {
             const int waiting = runningCount() >= m_maxConcurrent ? m_maxConcurrent : 0;
@@ -118,6 +106,7 @@ QVariant Downloader::data(const QModelIndex &index, int role) const
     case IsPlaylist: return job.playlist;
     case Items: return itemsVariant(job);
     case ItemCount: return int(job.items.size());
+    case Eta: return etaSeconds(job);
     }
     return {};
 }
@@ -126,7 +115,7 @@ QHash<int, QByteArray> Downloader::roleNames() const
 {
     return {{JobId, "jobId"}, {Url, "url"}, {Title, "title"}, {State, "status"},
             {Progress, "progress"}, {Detail, "detail"}, {IsPlaylist, "isPlaylist"},
-            {Items, "items"}, {ItemCount, "itemCount"}};
+            {Items, "items"}, {ItemCount, "itemCount"}, {Eta, "eta"}};
 }
 
 int Downloader::rowOf(int jobId) const
@@ -142,6 +131,56 @@ void Downloader::changed(int row)
 {
     if (row >= 0)
         emit dataChanged(index(row), index(row));
+}
+
+qreal Downloader::overallProgress(const Job &job)
+{
+    if (job.state == u"done")
+        return 1.0;
+    if (!job.items.isEmpty()) {
+        double done = 0;
+        for (const ItemStatus &it : job.items) {
+            if (it.state == u"done")
+                done += 1;
+            else if (it.state == u"downloading")
+                done += qBound(0.0, it.progress, 1.0);
+        }
+        return done / double(job.items.size());
+    }
+    return job.count > 0 ? (job.index - 1 + job.itemProgress) / job.count : 0.0;
+}
+
+// Keeps samples for the last ~10 s, plus one anchor at or before the window start.
+void Downloader::recordSample(Job &job)
+{
+    constexpr qint64 windowMs = 10000;
+    constexpr qsizetype maxSamples = 64;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qreal progress = overallProgress(job);
+    if (job.samples.isEmpty() || job.samples.constLast().progress != progress)
+        job.samples.append({now, progress});
+    while (job.samples.size() > 2
+           && (job.samples.at(1).ms <= now - windowMs || job.samples.size() > maxSamples))
+        job.samples.removeFirst();
+}
+
+// Seconds until the job reaches 100%, or -1 when there is no usable rate yet.
+int Downloader::etaSeconds(const Job &job)
+{
+    if (job.state != u"running")
+        return -1;
+    const qreal progress = overallProgress(job);
+    if (progress < 0.02 || progress >= 1 || job.samples.size() < 2)
+        return -1;
+    const Sample &first = job.samples.constFirst();
+    const Sample &last = job.samples.constLast();
+    const qint64 dtMs = last.ms - first.ms;
+    const qreal dp = last.progress - first.progress;
+    if (dtMs <= 0 || dp <= 0)
+        return -1;
+    const qreal rate = dp / qreal(dtMs);   // progress per ms
+    const qreal seconds = (1 - progress) / rate / 1000;
+    return int(std::clamp(seconds, 0.0, qreal(std::numeric_limits<int>::max())));
 }
 
 QVariantList Downloader::itemsVariant(const Job &job)
@@ -472,6 +511,7 @@ void Downloader::handleLine(int jobId, const QByteArray &line)
     case YtDlp::Event::None:
         return;
     }
+    recordSample(job);
     changed(row);
 }
 
@@ -571,6 +611,10 @@ void Downloader::onFinished(int jobId, int exitCode, QProcess::ExitStatus status
             } else {
                 m_library->rescan();
             }
+            // Fresh files have the least metadata of anything in the library,
+            // so they are looked up first. The scan the rescan triggers also
+            // resolves the paths the enricher is still waiting for.
+            m_library->enrichFiles(job.files);
         }
         if (job.state == u"failed")
             emit notice(QStringLiteral("Download failed: ") + job.outcome);

@@ -1,0 +1,3 @@
+- For substantial codebase exploration, prefers using the Haiku agent as the explorer. Confidence: 0.9
+- For larger changes, prefers working on a new branch and merging after implementation is complete. Confidence: 0.9
+- Considers work incomplete until the app has been fully built and installation/launchability (including application-menu access when relevant) has been verified. Confidence: 0.9

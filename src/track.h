@@ -30,6 +30,33 @@ struct Track {
     qint64 mtime = 0;       // file mtime (unix ms) at last scan
     qint64 size = 0;        // file size at last scan
 
+    // Loudness measured while the waveform was decoded: average level in dBFS
+    // and the highest sample in dBTP. 0 means "not measured yet", which is
+    // also the level of digital silence, so callers check for it explicitly.
+    float rmsDb = 0.0f;
+    float peakDb = 0.0f;
+    bool hasLoudness() const { return peakDb != 0.0f || rmsDb != 0.0f; }
+
+    // What MusicBrainz and the Cover Art Archive told us. It lives in its own
+    // table because a rescan rewrites the file's own tags, and enrichment has
+    // to survive that. Gaps in the file's own tags are filled from here when
+    // the library loads (see LibraryDb::loadAll).
+    struct Enrichment {
+        QString recordingId;   // MusicBrainz recording MBID
+        QString releaseId;     // MBID of the release the cover belongs to
+        QString artistId;      // MBID of the credited artist
+        QString albumArtist;   // from the release's artist credit
+        QString genre;         // comma separated
+        QString coverPath;     // cached image under the cover cache
+        int year = 0;
+        int discNo = 0;        // only used when the file carries none
+        int trackNo = 0;
+        int fetchedAt = 0;     // unix seconds
+        bool isEmpty() const { return recordingId.isEmpty() && releaseId.isEmpty(); }
+    };
+    Enrichment enriched;
+    bool isEnriched() const { return !enriched.isEmpty(); }
+
     bool isHiRes() const { return bitsPerSample >= 24 || sampleRate > 48000; }
 };
 
@@ -47,7 +74,8 @@ QPair<QString, QString> placeholderColors(const QString &key);
 
 // The role set QML delegates read (short names kept from the original mock):
 // ti id, t title, a artist, al album, d duration text, s seconds, f format,
-// khz sample spec, br bitrate text, hi hi-res, c1/c2 placeholder, cover url, liked.
+// khz sample spec, br bitrate text, hi hi-res, c1/c2 placeholder, cover url,
+// liked, g genre, en enriched, yr year.
 namespace TrackRoles {
 
 enum Role {
@@ -65,7 +93,11 @@ enum Role {
     Color2,
     Cover,
     Liked,
-    Last = Liked,
+    Genre,          // from the web lookup, empty when the file has none
+    Enriched,       // looked up on MusicBrainz at some point
+    Year,           // from the file, or from the lookup when the file has none
+    Remote,         // streamed from a Navidrome server rather than read from disk
+    Last = Remote,
 };
 
 QHash<int, QByteArray> names();

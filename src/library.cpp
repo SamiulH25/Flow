@@ -1,12 +1,15 @@
 #include "library.h"
+#include "enricher.h"
 
 #include "libraryscanner.h"
 #include "m3u.h"
 
 #include <QCollator>
+#include <QColor>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QSaveFile>
 #include <QJSEngine>
 #include <QLocale>
@@ -184,6 +187,16 @@ Library::Library(const QString &musicDir, const QString &dbPath, const QString &
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this,
             [this] { m_rescanDebounce.start(); });
 
+    // One collator for every sort: ICU setup is not free and the settings must
+    // not drift between the cached keys and the live compares.
+    m_collator.setCaseSensitivity(Qt::CaseInsensitive);
+    m_collator.setNumericMode(true);
+
+    QSettings settings;
+    m_navidrome.url = settings.value(QStringLiteral("navidrome/url")).toString();
+    m_navidrome.user = settings.value(QStringLiteral("navidrome/user")).toString();
+    m_navidrome.password = settings.value(QStringLiteral("navidrome/password")).toString();
+
     if (!m_db.open(m_dbPath))
         setError(QStringLiteral("Could not open library database: ") + m_db.lastError());
     reload();    // show the cached index immediately
@@ -228,6 +241,67 @@ void Library::storePeaks(qint64 id, const QByteArray &peaks)
 {
     if (m_db.isOpen() && m_indexById.contains(id) && !m_db.setPeaks(id, peaks))
         qWarning().noquote() << "flow: could not cache waveform:" << m_db.lastError();
+}
+
+namespace {
+
+// Dominant color of an image as a vivid "#rrggbb"; "" for grey or empty images.
+QString accentOf(const QImage &source)
+{
+    const QImage img = source.scaled(32, 32, Qt::IgnoreAspectRatio, Qt::FastTransformation)
+                           .convertToFormat(QImage::Format_RGB32);
+    double wr = 0, wg = 0, wb = 0, wsum = 0;   // saturation-weighted sums of kept pixels
+    qint64 ar = 0, ag = 0, ab = 0;             // plain sums of every pixel (fallback)
+    qint64 an = 0;
+    int kept = 0;
+    for (int y = 0; y < img.height(); ++y) {
+        const QRgb *row = reinterpret_cast<const QRgb *>(img.constScanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            const int r = qRed(row[x]), g = qGreen(row[x]), b = qBlue(row[x]);
+            ar += r; ag += g; ab += b; ++an;
+            const int mx = std::max({r, g, b}), mn = std::min({r, g, b});
+            if (mx < 40 || mn > 215)            // near-black or near-white
+                continue;
+            const double sat = double(mx - mn) / mx;
+            if (sat < 0.15)                      // too grey to carry a hue
+                continue;
+            wr += r * sat; wg += g * sat; wb += b * sat; wsum += sat;
+            ++kept;
+        }
+    }
+    if (an == 0)
+        return {};
+
+    double r, g, b;
+    if (kept >= 16) {
+        r = wr / wsum; g = wg / wsum; b = wb / wsum;
+    } else {
+        r = double(ar) / an; g = double(ag) / an; b = double(ab) / an;
+    }
+    float h, s, v;   // QColor::getHsvF takes float*
+    QColor::fromRgbF(r / 255.0, g / 255.0, b / 255.0).getHsvF(&h, &s, &v);
+    if (h < 0)                                   // achromatic: no hue to show
+        return {};
+    return QColor::fromHsvF(h, std::max<qreal>(s, 0.55), std::max<qreal>(v, 0.85))
+        .name(QColor::HexRgb);
+}
+
+} // namespace
+
+QString Library::accentFor(const QString &cover)
+{
+    if (cover.isEmpty())
+        return {};
+    const auto hit = m_accentCache.constFind(cover);
+    if (hit != m_accentCache.cend())
+        return *hit;
+
+    // Cover role is a file URL (track.cpp); accept plain local paths too.
+    const QUrl url(cover);
+    const QString path = url.isLocalFile() ? url.toLocalFile() : cover;
+    const QString accent = accentOf(QImage(path));
+    m_accentCache.insert(cover, accent);
+    return accent;
 }
 
 void Library::setError(const QString &error)
@@ -290,6 +364,75 @@ void Library::setSortMode(const QString &mode)
     applyFilter();
 }
 
+void Library::dropKeys()
+{
+    m_keys.foldValid = m_keys.albumValid = m_keys.titleValid = m_keys.artistValid = false;
+    m_keys.albumFold.clear();
+    m_keys.album.clear();
+    m_keys.title.clear();
+    m_keys.artist.clear();
+}
+
+void Library::ensureFoldKeys()
+{
+    if (m_keys.foldValid && m_keys.albumFold.size() == m_tracks.size())
+        return;
+    m_keys.albumFold.resize(m_tracks.size());
+    for (int i = 0; i < m_tracks.size(); ++i)
+        m_keys.albumFold[i] = TrackFormat::albumKey(m_tracks.at(i));
+    m_keys.foldValid = true;
+}
+
+void Library::ensureAlbumKeys()
+{
+    if (m_keys.albumValid && m_keys.album.size() == m_tracks.size())
+        return;
+    // QCollatorSortKey has no default constructor, so the list is built with
+    // append() (constructed keys), never resize(n) / operator[].
+    m_keys.album.clear();
+    m_keys.album.reserve(m_tracks.size());
+    for (int i = 0; i < m_tracks.size(); ++i)
+        m_keys.album.append(m_collator.sortKey(m_tracks.at(i).album));
+    m_keys.albumValid = true;
+}
+
+void Library::ensureTitleKeys()
+{
+    if (m_keys.titleValid && m_keys.title.size() == m_tracks.size())
+        return;
+    m_keys.title.clear();
+    m_keys.title.reserve(m_tracks.size());
+    for (int i = 0; i < m_tracks.size(); ++i)
+        m_keys.title.append(m_collator.sortKey(m_tracks.at(i).title));
+    m_keys.titleValid = true;
+}
+
+void Library::ensureArtistKeys()
+{
+    if (m_keys.artistValid && m_keys.artist.size() == m_tracks.size())
+        return;
+    m_keys.artist.clear();
+    m_keys.artist.reserve(m_tracks.size());
+    for (int i = 0; i < m_tracks.size(); ++i)
+        m_keys.artist.append(m_collator.sortKey(m_tracks.at(i).artist));
+    m_keys.artistValid = true;
+}
+
+void Library::refreshKeys(int trackIndex)
+{
+    if (trackIndex < 0 || trackIndex >= m_tracks.size())
+        return;
+    const Track &t = m_tracks.at(trackIndex);
+    if (m_keys.foldValid && trackIndex < m_keys.albumFold.size())
+        m_keys.albumFold[trackIndex] = TrackFormat::albumKey(t);
+    if (m_keys.albumValid && trackIndex < m_keys.album.size())
+        m_keys.album[trackIndex] = m_collator.sortKey(t.album);
+    if (m_keys.titleValid && trackIndex < m_keys.title.size())
+        m_keys.title[trackIndex] = m_collator.sortKey(t.title);
+    if (m_keys.artistValid && trackIndex < m_keys.artist.size())
+        m_keys.artist[trackIndex] = m_collator.sortKey(t.artist);
+}
+
 void Library::reload()
 {
     const QString prefix = m_musicDir + u'/';
@@ -297,31 +440,42 @@ void Library::reload()
     m_indexById.clear();
     m_indexByPath.clear();
     m_likedCount = 0;
+    dropKeys();
     if (m_db.isOpen()) {
         // The index may still hold tracks of a previously used music folder;
         // they are kept (with their likes) but not shown.
-        const QList<Track> all = m_db.loadAll();
-        for (const Track &t : all) {
-            if (!t.path.startsWith(prefix))
+        QList<Track> all = m_db.loadAll();
+        m_tracks.reserve(all.size());
+        // Remote tracks of the configured server show too; everything else stays hidden.
+        const QString remotePrefix =
+            m_navidrome.isValid() ? Navidrome::pathPrefix(m_navidrome) : QString();
+        for (Track &t : all) {
+            const bool local = t.path.startsWith(prefix);
+            const bool remote = !remotePrefix.isEmpty() && t.path.startsWith(remotePrefix);
+            if (!local && !remote)
                 continue;
-            m_indexById.insert(t.id, int(m_tracks.size()));
-            m_indexByPath.insert(t.path, int(m_tracks.size()));
-            m_tracks.append(t);
+            const int index = int(m_tracks.size());
+            m_indexById.insert(t.id, index);
+            m_indexByPath.insert(t.path, index);
             if (t.liked)
                 ++m_likedCount;
+            m_tracks.append(std::move(t));   // no deep copy of a dozen QString fields
         }
     }
     // "Recently added" orders by album, so an album scanned across a second
     // boundary is not split: every track takes its album's newest timestamp.
+    // The album key is folded once per track and reused for both the mapping
+    // and the per-track expansion (it used to be rebuilt twice per track).
+    ensureFoldKeys();
     QHash<QString, qint64> albumAdded;
-    for (const Track &t : std::as_const(m_tracks)) {
-        qint64 &latest = albumAdded[TrackFormat::albumKey(t)];
-        latest = qMax(latest, t.addedAt);
+    albumAdded.reserve(int(m_tracks.size() / 8) + 1);
+    for (int i = 0; i < m_tracks.size(); ++i) {
+        qint64 &latest = albumAdded[m_keys.albumFold.at(i)];
+        latest = qMax(latest, m_tracks.at(i).addedAt);
     }
-    m_albumAddedAt.clear();
-    m_albumAddedAt.reserve(m_tracks.size());
-    for (const Track &t : std::as_const(m_tracks))
-        m_albumAddedAt.append(albumAdded.value(TrackFormat::albumKey(t)));
+    m_albumAddedAt.resize(m_tracks.size());
+    for (int i = 0; i < m_tracks.size(); ++i)
+        m_albumAddedAt[i] = albumAdded.value(m_keys.albumFold.at(i));
     rebuildAlbums();
     reloadMixes();   // pruned tracks have left their mixes (FK cascade)
     // Fall back to everything when the viewed album or mix is gone.
@@ -380,51 +534,73 @@ void Library::applyFilter()
             rows.append(r);
     }
 
-    QCollator coll;
-    coll.setCaseSensitivity(Qt::CaseInsensitive);
-    coll.setNumericMode(true);
-    const auto albumOrder = [&](const Track &a, const Track &b) {
-        if (const int c = coll.compare(a.album, b.album))
-            return c < 0;
-        const QString ka = TrackFormat::albumKey(a);
-        const QString kb = TrackFormat::albumKey(b);
-        if (ka != kb)
-            return ka < kb;   // same title, different artist: keep albums apart
-        if (a.discNo != b.discNo)
-            return a.discNo < b.discNo;
-        if (a.trackNo != b.trackNo)
-            return a.trackNo < b.trackNo;
-        return coll.compare(a.title, b.title) < 0;
-    };
     // Albums and mixes have their own natural order for "def".
     if (m_sortMode == u"def" && m_viewKind != u"all") {
         m_trackModel.setRows(std::move(rows));
         emit countsChanged();
         return;
     }
-    const auto &all = m_tracks;
+
+    // Comparator keys: folding and collation are far too expensive to redo per
+    // comparison (a keystroke re-sorts the whole library), so they are built
+    // once here and cached across calls until the tracks change.
+    const bool byTitle = m_sortMode == u"title";
+    const bool byArtist = m_sortMode == u"artist";
+    const bool byAlbum = byTitle || byArtist || m_sortMode == u"def";
+    ensureFoldKeys();                       // albumKey, used by albumOrder
+    if (byAlbum) {
+        ensureAlbumKeys();
+        ensureTitleKeys();                  // albumOrder's final tie-break
+    }
+    if (byTitle)
+        ensureArtistKeys();                 // title sort's tie-break
+
+    const QList<QString> &fold = m_keys.albumFold;
+    const QList<QCollatorSortKey> &albumKey = m_keys.album;
+    const QList<QCollatorSortKey> &titleKey = m_keys.title;
+    const QList<QCollatorSortKey> &artistKey = m_keys.artist;
+
+    // Same album title, different artist: keep the albums apart: same disc and
+    // track numbers, then the title.
+    const auto albumOrder = [&](int ia, int ib) {
+        if (albumKey.at(ia) < albumKey.at(ib))
+            return true;
+        if (albumKey.at(ib) < albumKey.at(ia))
+            return false;
+        if (fold.at(ia) != fold.at(ib))
+            return fold.at(ia) < fold.at(ib);
+        const Track &a = m_tracks.at(ia);
+        const Track &b = m_tracks.at(ib);
+        if (a.discNo != b.discNo)
+            return a.discNo < b.discNo;
+        if (a.trackNo != b.trackNo)
+            return a.trackNo < b.trackNo;
+        return titleKey.at(ia) < titleKey.at(ib);
+    };
     std::stable_sort(rows.begin(), rows.end(), [&](const TrackListModel::Row &ra,
                                                    const TrackListModel::Row &rb) {
         const int ia = ra.track;
         const int ib = rb.track;
-        const Track &a = all.at(ia);
-        const Track &b = all.at(ib);
         if (m_sortMode == u"title") {
-            if (const int c = coll.compare(a.title, b.title))
-                return c < 0;
-            return coll.compare(a.artist, b.artist) < 0;
+            if (titleKey.at(ia) < titleKey.at(ib))
+                return true;
+            if (titleKey.at(ib) < titleKey.at(ia))
+                return false;
+            return artistKey.at(ia) < artistKey.at(ib);
         }
         if (m_sortMode == u"artist") {
-            if (const int c = coll.compare(a.artist, b.artist))
-                return c < 0;
-            return albumOrder(a, b);
+            if (artistKey.at(ia) < artistKey.at(ib))
+                return true;
+            if (artistKey.at(ib) < artistKey.at(ia))
+                return false;
+            return albumOrder(ia, ib);
         }
         if (m_sortMode == u"dur")
-            return a.durationMs > b.durationMs;
+            return m_tracks.at(ia).durationMs > m_tracks.at(ib).durationMs;
         // "def": recently added albums first, each in track order
         if (m_albumAddedAt.at(ia) != m_albumAddedAt.at(ib))
             return m_albumAddedAt.at(ia) > m_albumAddedAt.at(ib);
-        return albumOrder(a, b);
+        return albumOrder(ia, ib);
     });
 
     m_trackModel.setRows(std::move(rows));
@@ -433,22 +609,23 @@ void Library::applyFilter()
 
 void Library::rebuildAlbums()
 {
+    ensureFoldKeys();   // one albumKey per track, shared with the sorting paths
     QHash<QString, int> byKey;
     QList<AlbumListModel::Album> albums;
+    QList<qint64> albumsAddedAt;   // newest added_at per album, parallel to albums
     for (int i = 0; i < m_tracks.size(); ++i) {
-        const QString key = TrackFormat::albumKey(m_tracks.at(i));
+        const QString &key = m_keys.albumFold.at(i);
         auto it = byKey.find(key);
         if (it == byKey.end()) {
             it = byKey.insert(key, int(albums.size()));
-            albums.append(AlbumListModel::Album{});
+            albums.append(AlbumListModel::Album{key, {}});
+            albumsAddedAt.append(0);
         }
-        albums[*it].key = key;
-        albums[*it].tracks.append(i);
+        const int row = *it;
+        albums[row].tracks.append(i);
+        albumsAddedAt[row] = qMax(albumsAddedAt.at(row), m_tracks.at(i).addedAt);
     }
 
-    QCollator coll;
-    coll.setCaseSensitivity(Qt::CaseInsensitive);
-    coll.setNumericMode(true);
     const auto &all = m_tracks;
     for (auto &album : albums) {
         std::stable_sort(album.tracks.begin(), album.tracks.end(), [&](int ia, int ib) {
@@ -458,23 +635,29 @@ void Library::rebuildAlbums()
                 return a.discNo < b.discNo;
             if (a.trackNo != b.trackNo)
                 return a.trackNo < b.trackNo;
-            return coll.compare(a.title, b.title) < 0;
+            return m_collator.compare(a.title, b.title) < 0;
         });
     }
-    const auto addedAt = [&](const AlbumListModel::Album &album) {
-        qint64 latest = 0;
-        for (int i : album.tracks)
-            latest = qMax(latest, all.at(i).addedAt);
-        return latest;
-    };
-    std::stable_sort(albums.begin(), albums.end(), [&](const auto &a, const auto &b) {
-        const qint64 aa = addedAt(a);
-        const qint64 ab = addedAt(b);
+    // Sort album indices, not the albums themselves: the "added_at" used by the
+    // comparator is precomputed above instead of re-scanned for every compare.
+    QList<int> order;
+    order.reserve(albums.size());
+    for (int i = 0; i < albums.size(); ++i)
+        order.append(i);
+    std::stable_sort(order.begin(), order.end(), [&](int ia, int ib) {
+        const qint64 aa = albumsAddedAt.at(ia);
+        const qint64 ab = albumsAddedAt.at(ib);
         if (aa != ab)
             return aa > ab;
-        return coll.compare(all.at(a.tracks.first()).album, all.at(b.tracks.first()).album) < 0;
+        return m_collator.compare(all.at(albums.at(ia).tracks.first()).album,
+                                  all.at(albums.at(ib).tracks.first()).album)
+                < 0;
     });
-    m_albumModel.setAlbums(std::move(albums));
+    QList<AlbumListModel::Album> sorted;
+    sorted.reserve(albums.size());
+    for (int i : order)
+        sorted.append(std::move(albums[i]));
+    m_albumModel.setAlbums(std::move(sorted));
 }
 
 void Library::updateStorage()
@@ -573,6 +756,7 @@ void Library::onScanFinished(bool ok, const QString &error, const QStringList &d
         rescan();
     } else if (ok) {
         createPendingMixes();
+        createPendingEnrichments();
     }
 }
 
@@ -868,6 +1052,113 @@ void Library::createPendingMixes()
     }
 }
 
+bool Library::applyEnrichment(qint64 id, const Track::Enrichment &e)
+{
+    const auto it = m_indexById.constFind(id);
+    if (it == m_indexById.cend())
+        return false;
+    if (!m_db.setEnrichment(id, e)) {
+        setError(QStringLiteral("Could not save the lookup: ") + m_db.lastError());
+        return false;
+    }
+    Track &t = m_tracks[*it];
+    t.enriched = e;
+    // Gaps only: what the file itself says always wins.
+    if (t.albumArtist.isEmpty())
+        t.albumArtist = e.albumArtist;
+    if (t.year == 0)
+        t.year = e.year;
+    if (t.trackNo == 0)
+        t.trackNo = e.trackNo;
+    if (t.discNo == 0)
+        t.discNo = e.discNo;
+    if (!e.coverPath.isEmpty())
+        t.coverPath = e.coverPath;
+    refreshKeys(*it);   // an album artist from the lookup moves the album key
+    m_trackModel.trackChanged(*it);
+    if (!e.coverPath.isEmpty() || !e.albumArtist.isEmpty())
+        rebuildAlbums();   // album art and keys may have moved
+    emit trackUpdated(id);
+    return true;
+}
+
+void Library::enrichFiles(const QStringList &paths)
+{
+    if (!m_enricher || paths.isEmpty())
+        return;
+    // Files that are already indexed can be looked up right away; the rest
+    // wait for the rescan that the watcher will trigger anyway.
+    QList<qint64> now;
+    for (const QString &path : paths) {
+        const Track *t = trackByPath(QDir::cleanPath(path));
+        if (!t)
+            t = trackByPath(QFileInfo(path).canonicalFilePath());
+        if (t)
+            now.append(t->id);
+        else
+            m_pendingEnrich.append(path);
+    }
+    if (!now.isEmpty())
+        m_enricher->enrichAll(now);
+    if (!m_pendingEnrich.isEmpty())
+        rescan();
+}
+
+void Library::createPendingEnrichments()
+{
+    const QStringList pending = std::exchange(m_pendingEnrich, {});
+    if (!m_enricher || pending.isEmpty())
+        return;
+    QList<qint64> ids;
+    for (const QString &path : pending) {
+        const Track *t = trackByPath(QDir::cleanPath(path));
+        if (!t)
+            t = trackByPath(QFileInfo(path).canonicalFilePath());
+        if (t)
+            ids.append(t->id);
+    }
+    m_enricher->enrichAll(ids);
+}
+
+void Library::enrichAlbum(int albumRow)
+{
+    if (!m_enricher)
+        return;
+    const QVariantList ids = albumTrackIds(albumRow);
+    QList<qint64> list;
+    list.reserve(ids.size());
+    for (const QVariant &v : ids)
+        list.append(v.toLongLong());
+    m_enricher->enrichAll(list);
+}
+
+void Library::enrichShown()
+{
+    if (!m_enricher)
+        return;
+    const QVariantList ids = visibleTrackIds();
+    QList<qint64> list;
+    list.reserve(ids.size());
+    for (const QVariant &v : ids)
+        list.append(v.toLongLong());
+    m_enricher->enrichAll(list);
+}
+
+void Library::storeLoudness(qint64 id, float rmsDb, float peakDb)
+{
+    const auto it = m_indexById.constFind(id);
+    if (it == m_indexById.cend())
+        return;
+    Track &t = m_tracks[*it];
+    if (qFuzzyCompare(1.0 + t.rmsDb, 1.0 + rmsDb) && qFuzzyCompare(1.0 + t.peakDb, 1.0 + peakDb))
+        return;
+    t.rmsDb = rmsDb;
+    t.peakDb = peakDb;
+    if (!m_db.setLoudness(id, rmsDb, peakDb))
+        return;   // the numbers stay in memory; the next scan will try again
+    emit trackUpdated(id);
+}
+
 QVariantMap Library::exportMix(qint64 mixId, const QUrl &file)
 {
     const auto fail = [](const QString &error) {
@@ -877,14 +1168,152 @@ QVariantMap Library::exportMix(qint64 mixId, const QUrl &file)
     if (row < 0)
         return fail(QStringLiteral("No such mix"));
     QList<Track> tracks;
+    int skipped = 0;   // remote tracks have no file another player could open
     for (qint64 id : m_mixModel.mixes().at(row).trackIds) {
-        if (const Track *t = trackById(id))
-            tracks.append(*t);
+        if (const Track *t = trackById(id)) {
+            if (Navidrome::isRemotePath(t->path))
+                ++skipped;
+            else
+                tracks.append(*t);
+        }
     }
     const QString path = file.isLocalFile() ? file.toLocalFile() : file.toString();
     // QSaveFile: an interrupted write never leaves a truncated playlist behind.
     QSaveFile out(path);
     if (!out.open(QIODevice::WriteOnly) || out.write(M3u::write(tracks)) < 0 || !out.commit())
         return fail(QStringLiteral("Could not write %1").arg(QFileInfo(path).fileName()));
-    return {{QStringLiteral("ok"), true}, {QStringLiteral("added"), int(tracks.size())}};
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("added"), int(tracks.size())},
+            {QStringLiteral("skipped"), skipped}};
+}
+
+// ---------------------------------------------------------------- Navidrome
+
+void Library::setNavidrome(const QString &url, const QString &user, const QString &password)
+{
+    m_navidrome = NavidromeServer{url.trimmed(), user.trimmed(), password};
+    QSettings settings;
+    settings.setValue(QStringLiteral("navidrome/url"), m_navidrome.url);
+    settings.setValue(QStringLiteral("navidrome/user"), m_navidrome.user);
+    settings.setValue(QStringLiteral("navidrome/password"), m_navidrome.password);
+    settings.sync();
+    // The password is a credential: the settings file is readable by this user only.
+    QFile::setPermissions(settings.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    reload();   // tracks of a previously configured server stop showing
+    navidromeSync();
+}
+
+void Library::navidromeSync()
+{
+    cancelNavidromeSync();
+    if (!m_navidrome.isValid()) {
+        m_navidromeStatus = QStringLiteral("Enter the server address, user name and password.");
+        emit navidromeChanged();
+        return;
+    }
+    m_navidromeSync = new NavidromeSync(m_navidrome, m_coverDir, {}, this);
+    connect(m_navidromeSync, &NavidromeSync::finished, this, &Library::onNavidromeFinished);
+    m_navidromeStatus = QStringLiteral("Syncing…");
+    emit navidromeChanged();
+    m_navidromeSync->start();
+}
+
+void Library::navidromeForget()
+{
+    cancelNavidromeSync();
+    if (m_db.isOpen()) {
+        const bool ok = m_db.transaction()
+            && removeRemoteTracks(Navidrome::pathPrefix(m_navidrome), {}) && m_db.commit();
+        if (!ok) {
+            m_db.rollback();
+            setError(QStringLiteral("Could not remove Navidrome tracks: ") + m_db.lastError());
+        }
+    }
+    QSettings settings;
+    settings.remove(QStringLiteral("navidrome"));
+    m_navidrome = {};
+    m_navidromeStatus.clear();
+    reload();
+    emit navidromeChanged();
+}
+
+QUrl Library::sourceUrl(const Track &t) const
+{
+    if (!Navidrome::isRemotePath(t.path))
+        return QUrl::fromLocalFile(t.path);
+    if (!m_navidrome.isValid() || !t.path.startsWith(Navidrome::pathPrefix(m_navidrome)))
+        return {};   // a server that is no longer configured
+    return Navidrome::streamUrl(m_navidrome, Navidrome::songId(t.path));
+}
+
+void Library::onNavidromeFinished(NavidromeSyncResult result)
+{
+    if (m_navidromeSync) {
+        m_navidromeSync->deleteLater();
+        m_navidromeSync = nullptr;
+    }
+    if (!result.ok) {
+        m_navidromeStatus = QStringLiteral("Sync failed: ") + result.error;
+        emit navidromeChanged();
+        return;
+    }
+
+    // One transaction: a failure leaves the index as it was before the sync.
+    bool ok = m_db.isOpen() && m_db.transaction();
+    QString error = ok ? QString() : (m_db.isOpen() ? m_db.lastError()
+                                                    : QStringLiteral("library database is not open"));
+    QSet<QString> seen;
+    seen.reserve(result.tracks.size());
+    QSet<QString> albums;
+    for (const Track &t : std::as_const(result.tracks)) {
+        if (!ok)
+            break;
+        seen.insert(t.path);
+        albums.insert(TrackFormat::albumKey(t));
+        if (!m_db.upsert(t)) {
+            ok = false;
+            error = m_db.lastError();
+        }
+    }
+    if (ok && !removeRemoteTracks(Navidrome::pathPrefix(m_navidrome), seen)) {
+        ok = false;
+        error = m_db.lastError();
+    }
+    if (ok && !m_db.commit()) {
+        ok = false;
+        error = m_db.lastError();
+    }
+    if (!ok) {
+        m_db.rollback();
+        m_navidromeStatus = QStringLiteral("Sync failed: ") + error;
+        emit navidromeChanged();
+        return;
+    }
+
+    reload();
+    m_navidromeStatus = QStringLiteral("Synced %1 tracks in %2 albums")
+                            .arg(result.tracks.size())
+                            .arg(albums.size());
+    emit navidromeChanged();
+}
+
+bool Library::removeRemoteTracks(const QString &prefix, const QSet<QString> &keep)
+{
+    const QHash<QString, LibraryDb::Stamp> known = m_db.stamps();
+    for (auto it = known.cbegin(); it != known.cend(); ++it) {
+        if (!it.key().startsWith(prefix) || keep.contains(it.key()))
+            continue;
+        if (!m_db.remove(it.key()))
+            return false;
+    }
+    return true;
+}
+
+void Library::cancelNavidromeSync()
+{
+    if (!m_navidromeSync)
+        return;
+    m_navidromeSync->disconnect(this);   // a cancelled sync must not reach onNavidromeFinished
+    m_navidromeSync->cancel();
+    m_navidromeSync->deleteLater();
+    m_navidromeSync = nullptr;
 }

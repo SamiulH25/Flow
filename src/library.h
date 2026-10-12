@@ -2,11 +2,14 @@
 
 #include "librarydb.h"
 #include "track.h"
+#include "navidrome.h"
 
 #include <QAbstractListModel>
+#include <QCollator>
 #include <QFileSystemWatcher>
 #include <QHash>
 #include <QList>
+#include <QSet>
 #include <QObject>
 #include <QThread>
 #include <QTimer>
@@ -19,6 +22,7 @@
 class QJSEngine;
 class QQmlEngine;
 class Library;
+class Enricher;
 
 // Filtered + sorted view over the current source (all / album / mix).
 class TrackListModel : public QAbstractListModel
@@ -118,6 +122,10 @@ class Library : public QObject
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
     Q_PROPERTY(QString storageText READ storageText NOTIFY countsChanged)
     Q_PROPERTY(qreal storageUsed READ storageUsed NOTIFY countsChanged)
+    Q_PROPERTY(QString navidromeUrl READ navidromeUrl NOTIFY navidromeChanged)
+    Q_PROPERTY(QString navidromeUser READ navidromeUser NOTIFY navidromeChanged)
+    Q_PROPERTY(bool navidromeSyncing READ navidromeSyncing NOTIFY navidromeChanged)
+    Q_PROPERTY(QString navidromeStatus READ navidromeStatus NOTIFY navidromeChanged)
 
 public:
     Library(const QString &musicDir, const QString &dbPath, const QString &coverDir,
@@ -157,8 +165,12 @@ public:
     const QList<Track> &tracks() const { return m_tracks; }
     const Track *trackById(qint64 id) const;
     const Track *trackByPath(const QString &path) const;
+    // Where the player reads a track from: its file, or a fresh Navidrome stream.
+    // Empty when a remote track belongs to a server that is no longer configured.
+    QUrl sourceUrl(const Track &t) const;
     QByteArray cachedPeaks(qint64 id);
     void storePeaks(qint64 id, const QByteArray &peaks);
+    void storeLoudness(qint64 id, float rmsDb, float peakDb);
 
     Q_INVOKABLE void rescan();
     // Rescans once things settle (the same debounce as file-watcher events).
@@ -166,6 +178,32 @@ public:
     Q_INVOKABLE void toggleLike(qint64 id);
     Q_INVOKABLE QVariantList visibleTrackIds() const;       // current filter/sort order
     Q_INVOKABLE QVariantList albumTrackIds(int albumRow) const;
+    // Dominant color of a cover (file URL or local path) as "#rrggbb", boosted for
+    // use as an accent; "" when there is no usable image. Cached per cover string.
+    Q_INVOKABLE QString accentFor(const QString &cover);
+
+    // ---- metadata enrichment (MusicBrainz + Cover Art Archive) ----
+    void setEnricher(Enricher *enricher) { m_enricher = enricher; }
+    QString coverDir() const { return m_coverDir; }
+    // Stores what the lookup found and refreshes the rows that show it.
+    bool applyEnrichment(qint64 id, const Track::Enrichment &e);
+    // Queues files the library has not indexed yet (fresh downloads): the
+    // lookup runs once the next scan has turned them into tracks.
+    void enrichFiles(const QStringList &paths);
+    Q_INVOKABLE void enrichAlbum(int albumRow);
+    Q_INVOKABLE void enrichShown();      // every track the current view lists
+
+    // ---- Navidrome (Subsonic API) server: tracks are streamed, not copied ----
+    // Saves the server settings and syncs its library into the index. The
+    // password is stored in the settings file, which is made owner-only.
+    Q_INVOKABLE void setNavidrome(const QString &url, const QString &user, const QString &password);
+    Q_INVOKABLE void navidromeSync();
+    // Stops a running sync, removes the server's tracks and forgets its settings.
+    Q_INVOKABLE void navidromeForget();
+    QString navidromeUrl() const { return m_navidrome.url; }
+    QString navidromeUser() const { return m_navidrome.user; }
+    bool navidromeSyncing() const { return m_navidromeSync != nullptr; }
+    QString navidromeStatus() const { return m_navidromeStatus; }
 
     // Which tracks the list shows; filters and sort apply on top.
     Q_INVOKABLE void showAll();
@@ -203,8 +241,10 @@ signals:
     void viewChanged();
     void musicDirChanged();
     void mixAdded(qint64 mixId, const QString &name, int added, int missing);
+    void navidromeChanged();
 
 private:
+    void createPendingEnrichments();
     void reload();
     void applyFilter();
     void rebuildAlbums();
@@ -215,9 +255,39 @@ private:
     const AlbumListModel::Album *viewedAlbum() const;
     void setView(const QString &kind, const QString &albumKey, qint64 mixId);
     void onScanFinished(bool ok, const QString &error, const QStringList &dirs, bool changed);
+    void onNavidromeFinished(NavidromeSyncResult result);
+    bool removeRemoteTracks(const QString &prefix, const QSet<QString> &keep);
+    void cancelNavidromeSync();
     void createPendingMixes();
 
+    // Derived keys for the current tracks. Case folding and collation are far
+    // too expensive to redo inside sort comparators, and a filter keystroke
+    // sorts the whole library, so they are built once and reused until the
+    // track list (or one track's album fields) changes.
+    struct DerivedKeys {
+        QList<QString> albumFold;   // TrackFormat::albumKey per track
+        QList<QCollatorSortKey> album;   // collated album title
+        QList<QCollatorSortKey> title;
+        QList<QCollatorSortKey> artist;
+        bool foldValid = false;
+        bool albumValid = false;
+        bool titleValid = false;
+        bool artistValid = false;
+    };
+
+    void ensureFoldKeys();
+    void ensureAlbumKeys();
+    void ensureTitleKeys();
+    void ensureArtistKeys();
+    // Refreshes the caches that exist for a single track (enrichment filled in
+    // an album artist, which moves its album key).
+    void refreshKeys(int trackIndex);
+    void dropKeys();
+
     static inline Library *s_instance = nullptr;
+
+    QCollator m_collator;   // case-insensitive, numeric; shared by sorts
+    DerivedKeys m_keys;
 
     QString m_musicDir;
     QString m_dbPath;
@@ -253,6 +323,12 @@ private:
         QStringList paths;
     };
     QList<PendingMix> m_pendingMixes;   // waiting for a scan, see addMixAfterScan
+    NavidromeServer m_navidrome;
+    QString m_navidromeStatus;
+    NavidromeSync *m_navidromeSync = nullptr;   // owned by this; deleted when it finishes
+    QStringList m_pendingEnrich;   // paths waiting for the next scan
+    Enricher *m_enricher = nullptr;
+    QHash<QString, QString> m_accentCache;   // cover string -> "#rrggbb" or "", see accentFor
 
     QString m_error;
     QString m_storageText;

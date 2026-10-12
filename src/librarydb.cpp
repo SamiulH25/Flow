@@ -8,7 +8,7 @@
 #include <QSqlQuery>
 
 namespace {
-constexpr int kSchemaVersion = 3;
+constexpr int kSchemaVersion = 4;
 QAtomicInt s_connectionCounter;
 
 // A null QString binds as SQL NULL; the text columns are NOT NULL.
@@ -18,6 +18,40 @@ QString text(const QString &s)
 }
 } // namespace
 
+// Prepared once per connection and reused: the scanner upserts one of these per
+// changed file and the waveform pass touches every track, so re-parsing the SQL
+// on every call is pure overhead. The compiler cannot see this type's definition,
+// so it lives in a pointer the destructor resets before the connection is gone.
+struct LibraryDb::Statements
+{
+    QSqlQuery upsert;
+    QSqlQuery remove;
+    QSqlQuery peaks;
+    QSqlQuery setPeaks;
+
+    explicit Statements(const QSqlDatabase &db)
+        : upsert(db), remove(db), peaks(db), setPeaks(db)
+    {
+        upsert.prepare(QStringLiteral(
+            "INSERT INTO tracks (path, mtime, size, title, artist, album, album_artist, track_no,"
+            " disc_no, year, duration_ms, format, sample_rate, bits, bitrate, channels, cover,"
+            " added_at)"
+            " VALUES (:path, :mtime, :size, :title, :artist, :album, :album_artist, :track_no,"
+            " :disc_no, :year, :duration_ms, :format, :sample_rate, :bits, :bitrate, :channels,"
+            " :cover, :added_at)"
+            " ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size,"
+            " title=excluded.title, artist=excluded.artist, album=excluded.album,"
+            " album_artist=excluded.album_artist, track_no=excluded.track_no,"
+            " disc_no=excluded.disc_no, year=excluded.year, duration_ms=excluded.duration_ms,"
+            " format=excluded.format, sample_rate=excluded.sample_rate, bits=excluded.bits,"
+            " bitrate=excluded.bitrate, channels=excluded.channels, cover=excluded.cover,"
+            " peaks=NULL"));   // the file changed, so its cached waveform is stale
+        remove.prepare(QStringLiteral("DELETE FROM tracks WHERE path = ?"));
+        peaks.prepare(QStringLiteral("SELECT peaks FROM tracks WHERE id = ?"));
+        setPeaks.prepare(QStringLiteral("UPDATE tracks SET peaks = ? WHERE id = ?"));
+    }
+};
+
 LibraryDb::LibraryDb()
     : m_name(QStringLiteral("flow-library-%1").arg(s_connectionCounter.fetchAndAddRelaxed(1)))
 {
@@ -25,6 +59,7 @@ LibraryDb::LibraryDb()
 
 LibraryDb::~LibraryDb()
 {
+    m_stmts.reset();   // every query handle must be gone before the connection
     if (!QSqlDatabase::contains(m_name))
         return;
     {
@@ -56,10 +91,13 @@ bool LibraryDb::open(const QString &path)
     }
     // WAL lets the GUI read (and toggle likes) while the scanner writes.
     // foreign_keys makes pruned tracks drop out of playlists.
-    return exec(QStringLiteral("PRAGMA journal_mode=WAL"))
-        && exec(QStringLiteral("PRAGMA synchronous=NORMAL"))
-        && exec(QStringLiteral("PRAGMA foreign_keys=ON"))
-        && migrate();
+    if (!(exec(QStringLiteral("PRAGMA journal_mode=WAL"))
+          && exec(QStringLiteral("PRAGMA synchronous=NORMAL"))
+          && exec(QStringLiteral("PRAGMA foreign_keys=ON"))
+          && migrate()))
+        return false;
+    m_stmts = std::make_unique<Statements>(d);
+    return true;
 }
 
 bool LibraryDb::exec(const QString &sql)
@@ -130,6 +168,26 @@ bool LibraryDb::migrate()
     }
     if (ok && version < 3)
         ok = exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN peaks BLOB"));   // waveform cache
+    if (ok && version < 4) {
+        // Enrichment lives apart from the file's own tags: a rescan rewrites
+        // those, and what MusicBrainz told us must not be lost when it does.
+        ok = exec(QStringLiteral(
+                 "CREATE TABLE IF NOT EXISTS enrichment ("
+                 " track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,"
+                 " recording_id TEXT NOT NULL DEFAULT '',"
+                 " release_id TEXT NOT NULL DEFAULT '',"
+                 " artist_id TEXT NOT NULL DEFAULT '',"
+                 " album_artist TEXT NOT NULL DEFAULT '',"
+                 " genre TEXT NOT NULL DEFAULT '',"
+                 " cover TEXT NOT NULL DEFAULT '',"
+                 " year INTEGER NOT NULL DEFAULT 0,"
+                 " disc_no INTEGER NOT NULL DEFAULT 0,"
+                 " track_no INTEGER NOT NULL DEFAULT 0,"
+                 " fetched_at INTEGER NOT NULL DEFAULT 0)"))
+            // Loudness, measured in the same pass that draws the waveform.
+            && exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN rms_db REAL NOT NULL DEFAULT 0"))
+            && exec(QStringLiteral("ALTER TABLE tracks ADD COLUMN peak_db REAL NOT NULL DEFAULT 0"));
+    }
     ok = ok && exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion)) && commit();
     if (!ok)
         db().rollback();
@@ -142,9 +200,12 @@ QList<Track> LibraryDb::loadAll()
     QSqlQuery q(db());
     q.setForwardOnly(true);
     if (!q.exec(QStringLiteral(
-            "SELECT id, path, mtime, size, title, artist, album, album_artist, track_no,"
-            " disc_no, year, duration_ms, format, sample_rate, bits, bitrate, channels,"
-            " cover, liked, added_at FROM tracks"))) {
+            "SELECT t.id, t.path, t.mtime, t.size, t.title, t.artist, t.album, t.album_artist,"
+            " t.track_no, t.disc_no, t.year, t.duration_ms, t.format, t.sample_rate, t.bits,"
+            " t.bitrate, t.channels, t.cover, t.liked, t.added_at, t.rms_db, t.peak_db,"
+            " e.recording_id, e.release_id, e.artist_id, e.album_artist, e.genre, e.cover,"
+            " e.year, e.disc_no, e.track_no, e.fetched_at"
+            " FROM tracks t LEFT JOIN enrichment e ON e.track_id = t.id"))) {
         m_error = q.lastError().text();
         return out;
     }
@@ -170,9 +231,103 @@ QList<Track> LibraryDb::loadAll()
         t.coverPath = q.value(17).toString();
         t.liked = q.value(18).toBool();
         t.addedAt = q.value(19).toLongLong();
+        t.rmsDb = float(q.value(20).toDouble());
+        t.peakDb = float(q.value(21).toDouble());
+        t.enriched.recordingId = q.value(22).toString();
+        t.enriched.releaseId = q.value(23).toString();
+        t.enriched.artistId = q.value(24).toString();
+        t.enriched.albumArtist = q.value(25).toString();
+        t.enriched.genre = q.value(26).toString();
+        t.enriched.coverPath = q.value(27).toString();
+        t.enriched.year = q.value(28).toInt();
+        t.enriched.discNo = q.value(29).toInt();
+        t.enriched.trackNo = q.value(30).toInt();
+        t.enriched.fetchedAt = q.value(31).toInt();
+        // Enrichment only ever fills gaps: whatever the file itself says wins,
+        // so a hand-corrected tag is never overridden by a web lookup.
+        if (t.albumArtist.isEmpty())
+            t.albumArtist = t.enriched.albumArtist;
+        if (t.year == 0)
+            t.year = t.enriched.year;
+        if (t.trackNo == 0)
+            t.trackNo = t.enriched.trackNo;
+        if (t.discNo == 0)
+            t.discNo = t.enriched.discNo;
+        if (!t.enriched.coverPath.isEmpty())
+            t.coverPath = t.enriched.coverPath;
         out.append(t);
     }
     return out;
+}
+
+// Enrichment is written separately from upsert(): a rescan rewrites the file's
+// own tags, and the web lookup must not be lost when it does.
+bool LibraryDb::setEnrichment(qint64 id, const Track::Enrichment &e)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(
+        "INSERT INTO enrichment (track_id, recording_id, release_id, artist_id, album_artist,"
+        " genre, cover, year, disc_no, track_no, fetched_at)"
+        " VALUES (:id, :rec, :rel, :art, :album, :genre, :cover, :year, :disc, :track, :at)"
+        " ON CONFLICT(track_id) DO UPDATE SET recording_id=excluded.recording_id,"
+        " release_id=excluded.release_id, artist_id=excluded.artist_id,"
+        " album_artist=excluded.album_artist, genre=excluded.genre, cover=excluded.cover,"
+        " year=excluded.year, disc_no=excluded.disc_no, track_no=excluded.track_no,"
+        " fetched_at=excluded.fetched_at"));
+    q.bindValue(QStringLiteral(":id"), id);
+    q.bindValue(QStringLiteral(":rec"), text(e.recordingId));
+    q.bindValue(QStringLiteral(":rel"), text(e.releaseId));
+    q.bindValue(QStringLiteral(":art"), text(e.artistId));
+    q.bindValue(QStringLiteral(":album"), text(e.albumArtist));
+    q.bindValue(QStringLiteral(":genre"), text(e.genre));
+    q.bindValue(QStringLiteral(":cover"), text(e.coverPath));
+    q.bindValue(QStringLiteral(":year"), e.year);
+    q.bindValue(QStringLiteral(":disc"), e.discNo);
+    q.bindValue(QStringLiteral(":track"), e.trackNo);
+    q.bindValue(QStringLiteral(":at"), e.fetchedAt > 0 ? e.fetchedAt
+                                                      : int(QDateTime::currentSecsSinceEpoch()));
+    if (!q.exec()) {
+        m_error = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+Track::Enrichment LibraryDb::enrichment(qint64 id)
+{
+    Track::Enrichment e;
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(
+        "SELECT recording_id, release_id, artist_id, album_artist, genre, cover, year, disc_no,"
+        " track_no, fetched_at FROM enrichment WHERE track_id = :id"));
+    q.bindValue(QStringLiteral(":id"), id);
+    if (!q.exec() || !q.next())
+        return e;
+    e.recordingId = q.value(0).toString();
+    e.releaseId = q.value(1).toString();
+    e.artistId = q.value(2).toString();
+    e.albumArtist = q.value(3).toString();
+    e.genre = q.value(4).toString();
+    e.coverPath = q.value(5).toString();
+    e.year = q.value(6).toInt();
+    e.discNo = q.value(7).toInt();
+    e.trackNo = q.value(8).toInt();
+    e.fetchedAt = q.value(9).toInt();
+    return e;
+}
+
+bool LibraryDb::setLoudness(qint64 id, float rmsDb, float peakDb)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("UPDATE tracks SET rms_db = :rms, peak_db = :peak WHERE id = :id"));
+    q.bindValue(QStringLiteral(":rms"), double(rmsDb));
+    q.bindValue(QStringLiteral(":peak"), double(peakDb));
+    q.bindValue(QStringLiteral(":id"), id);
+    if (!q.exec()) {
+        m_error = q.lastError().text();
+        return false;
+    }
+    return true;
 }
 
 QHash<QString, LibraryDb::Stamp> LibraryDb::stamps()
@@ -191,21 +346,9 @@ QHash<QString, LibraryDb::Stamp> LibraryDb::stamps()
 
 bool LibraryDb::upsert(const Track &t)
 {
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral(
-        "INSERT INTO tracks (path, mtime, size, title, artist, album, album_artist, track_no,"
-        " disc_no, year, duration_ms, format, sample_rate, bits, bitrate, channels, cover,"
-        " added_at)"
-        " VALUES (:path, :mtime, :size, :title, :artist, :album, :album_artist, :track_no,"
-        " :disc_no, :year, :duration_ms, :format, :sample_rate, :bits, :bitrate, :channels,"
-        " :cover, :added_at)"
-        " ON CONFLICT(path) DO UPDATE SET mtime=excluded.mtime, size=excluded.size,"
-        " title=excluded.title, artist=excluded.artist, album=excluded.album,"
-        " album_artist=excluded.album_artist, track_no=excluded.track_no,"
-        " disc_no=excluded.disc_no, year=excluded.year, duration_ms=excluded.duration_ms,"
-        " format=excluded.format, sample_rate=excluded.sample_rate, bits=excluded.bits,"
-        " bitrate=excluded.bitrate, channels=excluded.channels, cover=excluded.cover,"
-        " peaks=NULL"));   // the file changed, so its cached waveform is stale
+    if (!m_stmts)
+        return false;
+    QSqlQuery &q = m_stmts->upsert;
     q.bindValue(QStringLiteral(":path"), text(t.path));
     q.bindValue(QStringLiteral(":mtime"), t.mtime);
     q.bindValue(QStringLiteral(":size"), t.size);
@@ -234,9 +377,10 @@ bool LibraryDb::upsert(const Track &t)
 
 bool LibraryDb::remove(const QString &path)
 {
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral("DELETE FROM tracks WHERE path = ?"));
-    q.addBindValue(path);
+    if (!m_stmts)
+        return false;
+    QSqlQuery &q = m_stmts->remove;
+    q.bindValue(0, path);   // bindValue by position replaces; addBindValue would grow
     if (!q.exec()) {
         m_error = q.lastError().text();
         return false;
@@ -259,22 +403,30 @@ bool LibraryDb::setLiked(qint64 id, bool liked)
 
 QByteArray LibraryDb::peaks(qint64 id)
 {
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral("SELECT peaks FROM tracks WHERE id = ?"));
-    q.addBindValue(id);
+    if (!m_stmts)
+        return {};
+    QSqlQuery &q = m_stmts->peaks;
+    q.bindValue(0, id);
     if (!q.exec()) {
         m_error = q.lastError().text();
         return {};
     }
-    return q.next() ? q.value(0).toByteArray() : QByteArray();
+    QByteArray out;
+    if (q.next())
+        out = q.value(0).toByteArray();
+    // Finalize the SELECT: a statement left active holds a read snapshot open,
+    // and later reads on this connection would then miss the scanner's writes.
+    q.finish();
+    return out;
 }
 
 bool LibraryDb::setPeaks(qint64 id, const QByteArray &peaks)
 {
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral("UPDATE tracks SET peaks = ? WHERE id = ?"));
-    q.addBindValue(peaks);
-    q.addBindValue(id);
+    if (!m_stmts)
+        return false;
+    QSqlQuery &q = m_stmts->setPeaks;
+    q.bindValue(0, peaks);
+    q.bindValue(1, id);
     if (!q.exec()) {
         m_error = q.lastError().text();
         return false;
@@ -386,6 +538,15 @@ bool LibraryDb::transaction()
 bool LibraryDb::commit()
 {
     if (!db().commit()) {
+        m_error = db().lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool LibraryDb::rollback()
+{
+    if (!db().rollback()) {
         m_error = db().lastError().text();
         return false;
     }

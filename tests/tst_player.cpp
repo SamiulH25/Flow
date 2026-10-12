@@ -7,6 +7,9 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QtEndian>
+#include <QtMultimedia/qaudio.h>
+
+#include <cmath>
 
 namespace {
 
@@ -249,6 +252,45 @@ private slots:
         m_player = std::make_unique<Player>(m_lib.get());
         QCOMPARE(m_player->queueCount(), 0);
         QVERIFY(!m_player->hasTrack());
+    }
+
+    void matchingKeepsTheLoudnessLadderUpright()
+    {
+        // The slider is perceptual and the output volume is linear, so the
+        // matching gain has to scale the *linear* volume. Scaling the raw
+        // slider value instead applied the gain on the wrong side of the
+        // slider curve: the attenuation came out up to twice as deep as the
+        // panel reported, and past the knee of that curve the order flipped,
+        // so a brick-walled master played quieter than a track below target.
+        for (qreal slider : {0.5, 0.8, 1.0}) {
+            const float plain = Player::outputVolume(slider, 1.0f);
+            QVERIFY(plain > 0.0f && plain <= 1.0f);
+            // Slider on its own still means exactly what it meant before matching existed.
+            QCOMPARE(plain, QtAudio::convertVolume(float(slider), QtAudio::LogarithmicVolumeScale,
+                                                   QtAudio::LinearVolumeScale));
+            // The dB the panel prints is the dB that comes off the output.
+            const float half = Player::outputVolume(slider, 0.5f);
+            QVERIFY2(qAbs(20 * std::log10(half / plain) + 6.0206) < 0.01,
+                     qPrintable(QString::number(20 * std::log10(half / plain))));
+
+            double previous = 0.0;
+            for (float rmsDb : {-40.f, -20.f, -16.f, -14.f, -12.f, -9.f, -6.f, -3.f, 0.f}) {
+                const float gain = Waveform::matchGain(rmsDb);
+                QVERIFY(gain <= 1.0f);
+                // What the listener hears: output volume times the track's own level.
+                const double level = Player::outputVolume(slider, gain) * std::pow(10.0, rmsDb / 20.0);
+                QVERIFY2(level >= previous * (1.0 - 1e-6),
+                         qPrintable(QStringLiteral("slider %1, %2 dBFS: %3 < %4")
+                                            .arg(slider).arg(rmsDb).arg(level).arg(previous)));
+                previous = level;
+                // A track above the target lands on it exactly; nothing overshoots.
+                if (rmsDb > Waveform::kTargetDb) {
+                    const double target = plain * std::pow(10.0, Waveform::kTargetDb / 20.0);
+                    QVERIFY2(qAbs(20 * std::log10(level / target)) < 0.01,
+                             qPrintable(QStringLiteral("%1 dBFS at slider %2").arg(rmsDb).arg(slider)));
+                }
+            }
+        }
     }
 
     void cleanupTestCase()

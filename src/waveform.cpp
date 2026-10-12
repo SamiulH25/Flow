@@ -7,25 +7,40 @@
 #include <cmath>
 
 namespace {
-constexpr int kAnalysisRate = 8000;   // plenty for an overview, keeps decode cheap
+// 0 dBFS is full scale; anything below the floor is reported as the floor
+// rather than as -infinity, so the panel never shows nonsense.
+constexpr double kDbFloor = -90.0;
+}
+
+float Waveform::toDb(double linear)
+{
+    if (linear <= 1e-6)
+        return float(kDbFloor);
+    return float(qBound(kDbFloor, 20.0 * std::log10(linear), 0.0));
+}
+
+float Waveform::matchGain(float rmsDb)
+{
+    // A player can only attenuate: the volume of a track that is already
+    // quieter than the target is left exactly where the user put it.
+    if (rmsDb <= kTargetDb || rmsDb <= kDbFloor)
+        return 1.0f;
+    return float(std::pow(10.0, (kTargetDb - rmsDb) / 20.0));
 }
 
 Waveform::Waveform(QObject *parent)
     : QObject(parent)
 {
-    QAudioFormat format;
-    format.setSampleRate(kAnalysisRate);
-    format.setChannelCount(1);
-    format.setSampleFormat(QAudioFormat::Float);
-    m_decoder.setAudioFormat(format);   // a hint; buffers are read generically anyway
-
+    // No downsample: ffmpeg decodes the whole stream either way, and asking for
+    // 8 kHz only resamples the result — which both blurs the overview and
+    // overshoots the peaks, so the levels would read a couple of dB high.
     connect(&m_decoder, &QAudioDecoder::bufferReady, this, &Waveform::onBuffer);
     connect(&m_decoder, &QAudioDecoder::finished, this, &Waveform::onFinished);
     connect(&m_decoder, qOverload<QAudioDecoder::Error>(&QAudioDecoder::error), this,
             &Waveform::onError);
 }
 
-void Waveform::request(qint64 trackId, const QString &path)
+void Waveform::request(qint64 trackId, const QUrl &source)
 {
     m_trackId = -1;   // anything the old decode still reports is ignored
     m_decoder.stop();
@@ -35,13 +50,17 @@ void Waveform::request(qint64 trackId, const QString &path)
     m_accFrames = 0;
     m_sums.clear();
     m_frames.clear();
-    m_decoder.setSource(QUrl::fromLocalFile(path));
+    m_peak = 0.0;
+    m_decoder.setSource(source);
     m_decoder.start();
 }
 
 void Waveform::addSample(double v)
 {
     m_acc += v * v;
+    const double a = std::abs(v);
+    if (a > m_peak)
+        m_peak = a;
     if (++m_accFrames >= m_chunkFrames) {
         m_sums.append(m_acc);
         m_frames.append(m_accFrames);
@@ -111,8 +130,20 @@ void Waveform::onFinished()
         emit failed(id);
         return;
     }
-    emit ready(id, toBars(m_sums, m_frames));
+    // The same pass that draws the overview also measures the track: the sum of
+    // squares is already there, and the highest sample is free to keep. Both
+    // are read at 8 kHz, so they describe the track rather than the whole
+    // spectrum — good enough to compare tracks, which is all they are for.
+    double squares = 0.0;
+    qint64 frames = 0;
+    for (int i = 0; i < m_sums.size(); ++i) {
+        squares += m_sums.at(i);
+        frames += m_frames.at(i);
+    }
+    const double rms = frames > 0 ? std::sqrt(squares / double(frames)) : 0.0;
+    emit ready(id, toBars(m_sums, m_frames), toDb(rms), toDb(m_peak));
 }
+
 
 void Waveform::onError()
 {

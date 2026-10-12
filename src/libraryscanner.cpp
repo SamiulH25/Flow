@@ -42,6 +42,10 @@ QString toQString(const TagLib::String &s)
     return QString::fromStdString(s.to8Bit(true)).trimmed();
 }
 
+// Set for the duration of one scan() so folderCover() answers are memoised;
+// null outside a scan (see folderCover).
+thread_local QHash<QString, QString> *g_folderCoverCache = nullptr;
+
 QString firstProperty(const TagLib::PropertyMap &props, const char *key)
 {
     const auto it = props.find(key);
@@ -118,15 +122,31 @@ QString folderCover(const QString &dir)
         QStringLiteral("folder.jpg"), QStringLiteral("folder.jpeg"), QStringLiteral("folder.png"),
         QStringLiteral("front.jpg"),  QStringLiteral("front.png"),  QStringLiteral("albumart.jpg"),
     };
+    // A folder's cover is asked for once per track, so an album costs one
+    // directory listing per track for the same answer. While a scan runs the
+    // answers are memoised (see scan()); outside a scan the lookup is unchanged,
+    // so a cover added between scans is always picked up.
+    if (g_folderCoverCache) {
+        const auto cached = g_folderCoverCache->constFind(dir);
+        if (cached != g_folderCoverCache->constEnd())
+            return *cached;
+    }
     const QStringList found = QDir(dir).entryList(names, QDir::Files, QDir::Name);
+    QString result;
     // Honour the preference order above rather than alphabetical order.
     for (const QString &want : names) {
         for (const QString &have : found) {
-            if (have.compare(want, Qt::CaseInsensitive) == 0)
-                return dir + u'/' + have;
+            if (have.compare(want, Qt::CaseInsensitive) == 0) {
+                result = dir + u'/' + have;
+                break;
+            }
         }
+        if (!result.isEmpty())
+            break;
     }
-    return {};
+    if (g_folderCoverCache)
+        g_folderCoverCache->insert(dir, result);
+    return result;
 }
 
 } // namespace
@@ -218,6 +238,16 @@ LibraryScanner::Result LibraryScanner::scan(const QString &root,
 
     QHash<QString, LibraryDb::Stamp> known = db.stamps();
     QSet<QString> seen;
+
+    // Memoise folder-cover lookups for the duration of this walk: an album of
+    // 20 tracks in one folder used to mean 20 identical directory listings.
+    QHash<QString, QString> folderCovers;
+    struct CoverCacheScope {
+        explicit CoverCacheScope(QHash<QString, QString> &cache) { g_folderCoverCache = &cache; }
+        ~CoverCacheScope() { g_folderCoverCache = nullptr; }
+    } coverCacheScope(folderCovers);
+    Q_UNUSED(coverCacheScope);
+
     const auto cancelled = [cancel] { return cancel && cancel->load(); };
 
     r.dirs.append(rootInfo.absoluteFilePath());
