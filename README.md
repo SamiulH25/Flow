@@ -1,0 +1,60 @@
+# Flow
+
+A native Linux music player written in C++ and Qt 6 (QML). It plays local
+FLAC, MP3 and WAV files, streams from a Navidrome / Subsonic server, and
+ships a headless CLI. Built for Wayland (Hyprland), with a custom QML interface.
+
+![Flow — Collection view](docs/screenshots/main.png)
+
+## Features
+
+- **Library:** TagLib scan into SQLite, incremental rescans, folder watching,
+  likes, embedded and folder cover art, search and format filters.
+- **Playback:** `QMediaPlayer` (FFmpeg backend), seek, volume, shuffle,
+  repeat, play queue with drag-reorder, synced lyrics, saved queue on launch.
+- **Mixes:** create, rename and reorder mixes; M3U import and export.
+- **Visualizer:** live 48-band spectrum and oscilloscope in the now-playing panel.
+- **Waveform and loudness:** cached per track in the index.
+- **Navidrome:** browse and stream a Subsonic server. Nothing is copied to disk.
+- **Downloads:** YouTube / YouTube Music links via `yt-dlp` (optional).
+- **Metadata enrichment:** MusicBrainz and Cover Art Archive, stored in the
+  index only. Audio files are never written to.
+- **MPRIS:** `playerctl`, Hyprland keybinds and shell widgets.
+- **`flow-cli`:** headless front end for scanning, listing, mixes, downloads
+  and diagnostics.
+
+## Build
+
+Requires Qt 6 (base, declarative, multimedia with the FFmpeg backend, wayland),
+TagLib, SQLite, CMake and Ninja. Verified with Qt 6.11.2.
+
+```sh
+cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release
+ctest --test-dir build-release
+```
+
+Per-user install with no sudo, which adds the app to the launcher:
+
+```sh
+cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/.local
+cmake --build build-release
+cmake --install build-release
+```
+
+## Run
+
+```sh
+flow --library ~/Music      # the folder is remembered; default is ~/Music
+flow --help
+flow-cli list --json        # headless: scan, list, mixes, doctor, download
+```
+
+Index: `~/.local/share/Flow/Flow/library.db`. Settings and the saved queue:
+`~/.config/Flow/Flow.conf`.
+
+## Design
+
+`STACK.md` records the technology choices and the scaling rules. The clickable
+design specs are `ui-demo.html` and `ui-demo-console.html`. Serve them with
+`python3 -m http.server 8100 --bind 127.0.0.1` from the repo root.
