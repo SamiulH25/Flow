@@ -1,7 +1,9 @@
 #include "downloader.h"
 #include "enricher.h"
 #include "library.h"
+#if FLOW_MPRIS
 #include "mpris.h"
+#endif
 #include "player.h"
 
 #include <QCommandLineParser>
@@ -11,7 +13,7 @@
 #include <QGuiApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
-#include <QSettings>
+#include "settings.h"
 #include <QStandardPaths>
 #include <QQmlError>
 #include <QQuickWindow>
@@ -57,7 +59,7 @@ int main(int argc, char *argv[])
     cli.process(app);   // exits on --help, --version or unknown options
 
     // Music folder: --library (remembered), else the last one, else ~/Music.
-    QSettings settings;
+    auto settings = flowSettings();
     QString musicDir = settings.value(QStringLiteral("library/dir")).toString();
     if (cli.isSet(libraryOption)) {
         musicDir = QDir(cli.value(libraryOption)).absolutePath();
@@ -96,6 +98,7 @@ int main(int argc, char *argv[])
     if (engine.rootObjects().isEmpty())
         return 1;
 
+#if FLOW_MPRIS
     Mpris mpris(&player, &library);
     mpris.registerOnBus();
     if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first())) {
@@ -105,6 +108,7 @@ int main(int argc, char *argv[])
             window->requestActivate();
         });
     }
+#endif
 
     const QString shotPath = cli.value(screenshotOption);
     if (!shotPath.isEmpty()) {

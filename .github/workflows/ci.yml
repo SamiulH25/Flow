@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  QT_VERSION: '6.10.1'
+  TAGLIB_TAG: 'v2.3.2'
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ubuntu's Qt (6.4) and TagLib (1.x) are too old: Flow needs Qt >= 6.8 and TagLib 2.
+      - name: Install build tools and runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsqlite3-dev dbus dbus-x11 \
+            libxkbcommon-dev libgl-dev libegl-dev libfontconfig-dev libdbus-1-dev
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: 'qtmultimedia qtshadertools qtsvg qtwayland'
+          cache: true
+
+      - name: Build TagLib
+        run: |
+          git clone --depth 1 --branch "$TAGLIB_TAG" https://github.com/taglib/taglib.git "$RUNNER_TEMP/taglib"
+          cmake -S "$RUNNER_TEMP/taglib" -B "$RUNNER_TEMP/taglib/build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/taglib-install"
+          cmake --build "$RUNNER_TEMP/taglib/build"
+          cmake --install "$RUNNER_TEMP/taglib/build"
+
+      - name: Configure, build and test
+        env:
+          QT_QPA_PLATFORM: offscreen
+          CMAKE_PREFIX_PATH: ${{ runner.temp }}/taglib-install
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          modules: 'qtmultimedia qtshadertools qtsvg'
+          cache: true
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build TagLib
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch $env:TAGLIB_TAG https://github.com/taglib/taglib.git "$env:RUNNER_TEMP\taglib"
+          cmake -S "$env:RUNNER_TEMP\taglib" -B "$env:RUNNER_TEMP\taglib\build" -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_SHARED_LIBS=ON `
+            -DCMAKE_INSTALL_PREFIX="$env:RUNNER_TEMP\taglib-install"
+          cmake --build "$env:RUNNER_TEMP\taglib\build"
+          cmake --install "$env:RUNNER_TEMP\taglib\build"
+
+      - name: Configure, build and test
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_PREFIX_PATH="$env:RUNNER_TEMP\taglib-install"
+          cmake --build build
+          ctest --test-dir build --output-on-failure

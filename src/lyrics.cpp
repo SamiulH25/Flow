@@ -1,4 +1,5 @@
 #include "lyrics.h"
+#include "tagpath.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -28,7 +29,8 @@ QString readSidecar(const QString &audioPath)
 
 QString readEmbedded(const QString &audioPath)
 {
-    TagLib::FileRef f(QFile::encodeName(audioPath).constData(), false);
+    const TagPath name = tagPath(audioPath);
+    TagLib::FileRef f(name.c_str(), false);
     if (f.isNull())
         return {};
     const TagLib::PropertyMap props = f.properties();

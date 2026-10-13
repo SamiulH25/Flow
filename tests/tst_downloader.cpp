@@ -1,7 +1,9 @@
-// Download jobs end to end against a fake yt-dlp: a shell script that speaks
-// the same "flow-*" lines, writes real (tagged WAV) files and fails on cue.
+// Download jobs end to end against a fake yt-dlp: a helper program (fakeytdlp.cpp)
+// that speaks the same "flow-*" lines, writes real (tagged WAV) files and fails on cue.
 #include "downloader.h"
 #include "library.h"
+#include "fakeytdlp.h"
+#include "tagpath.h"
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -41,50 +43,14 @@ bool writeTaggedWav(const QString &path, const char *title)
         f.write(h);
         f.write(QByteArray(dataSize, '\0'));
     }
-    TagLib::FileRef f(QFile::encodeName(path).constData());
+    const TagPath name = tagPath(path);
+    TagLib::FileRef f(name.c_str());
     if (f.isNull() || !f.tag())
         return false;
     f.tag()->setTitle(title);
     f.tag()->setArtist("Artist");
     return f.save();
 }
-
-// Speaks Flow's yt-dlp protocol for a few made-up links.
-const char *const fakeYtDlp = R"sh(#!/bin/sh
-printf '%s\n' "$@" > "$FLOW_FAKE_DIR/args"
-home=
-for a; do case $a in home:*) home=${a#home:} ;; esac; done
-for url; do :; done
-case $url in
-*v=song*)
-    mkdir -p "$home/Artist/Singles"
-    echo 'flow-item {"title": "Song (Official Video)", "track": "One"}'
-    echo 'flow-progress 50 100'
-    echo 'flow-progress 100 NA'
-    cp "$FLOW_FAKE_DIR/one.wav" "$home/Artist/Singles/One.wav"
-    printf 'flow-file "%s"\n' "$home/Artist/Singles/One.wav"
-    ;;
-*list=PL*)
-    mkdir -p "$home/Artist/Mixed"
-    echo 'flow-item {"title": "Two", "playlist_index": 1, "n_entries": 3, "playlist_title": "Road trip"}'
-    cp "$FLOW_FAKE_DIR/two.wav" "$home/Artist/Mixed/Two.wav"
-    printf 'flow-file "%s"\n' "$home/Artist/Mixed/Two.wav"
-    echo 'ERROR: [youtube] gone: Video unavailable' >&2
-    echo 'flow-item {"title": "Three", "playlist_index": 3, "n_entries": 3, "playlist_title": "Road trip"}'
-    cp "$FLOW_FAKE_DIR/three.wav" "$home/Artist/Mixed/Three.wav"
-    printf 'flow-file "%s"' "$home/Artist/Mixed/Three.wav"
-    exit 1
-    ;;
-*v=bad*)
-    echo 'ERROR: [youtube] bad: Video unavailable. This video is private' >&2
-    exit 1
-    ;;
-*v=slow*)
-    echo 'flow-item {"title": "Slow"}'
-    sleep 30
-    ;;
-esac
-)sh";
 
 } // namespace
 
@@ -132,17 +98,13 @@ private slots:
         QVERIFY(writeTaggedWav(m_fake + QStringLiteral("/one.wav"), "One"));
         QVERIFY(writeTaggedWav(m_fake + QStringLiteral("/two.wav"), "Two"));
         QVERIFY(writeTaggedWav(m_fake + QStringLiteral("/three.wav"), "Three"));
-        QFile script(m_fake + QStringLiteral("/yt-dlp"));
-        QVERIFY(script.open(QIODevice::WriteOnly));
-        script.write(fakeYtDlp);
-        script.close();
-        QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        QVERIFY(installFakeYtDlp(m_fake));
         qputenv("FLOW_FAKE_DIR", QFile::encodeName(m_fake));
 
         m_library = new Library(m_music, m_dir.filePath(QStringLiteral("library.db")),
                                 m_dir.filePath(QStringLiteral("covers")), this);
         QTRY_VERIFY(!m_library->scanning());
-        m_downloader = new Downloader(m_library, m_temp, script.fileName(), this);
+        m_downloader = new Downloader(m_library, m_temp, fakeYtDlpPath(m_fake), this);
         QVERIFY(m_downloader->available());
         QCOMPARE(m_downloader->destination(), m_music + QStringLiteral("/YouTube"));
         QCOMPARE(m_downloader->maxConcurrent(), 3);

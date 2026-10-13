@@ -1,6 +1,7 @@
 #include "libraryscanner.h"
 
 #include "librarydb.h"
+#include "tagpath.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -166,7 +167,8 @@ bool LibraryScanner::readTrack(const QString &path, const QString &coverDir, Tra
 {
     silenceTagLib();
     const QFileInfo info(path);
-    TagLib::FileRef f(QFile::encodeName(info.absoluteFilePath()).constData(), true,
+    const TagPath name = tagPath(info.absoluteFilePath());
+    TagLib::FileRef f(name.c_str(), true,
                       TagLib::AudioProperties::Average);
     if (f.isNull())
         return false;

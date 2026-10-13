@@ -5,7 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QUrl>
-#include <QSettings>
+#include "settings.h"
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
@@ -209,7 +209,7 @@ private slots:
     void switchingFolders()
     {
         Library &lib = *m_lib;
-        qputenv("XDG_CONFIG_HOME", m_tmp.filePath(QStringLiteral("config")).toUtf8());
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_tmp.filePath(QStringLiteral("config")));
         const QString other = m_tmp.filePath(QStringLiteral("other"));
         QVERIFY(QDir().mkpath(other));
         QVERIFY(writeTaggedWav(other + QStringLiteral("/z.wav"), "Elsewhere", "Gamma", 1));
@@ -219,7 +219,7 @@ private slots:
         QCOMPARE(lib.musicDir(), QDir(other).absolutePath());
         QTRY_VERIFY_WITH_TIMEOUT(!lib.scanning() && lib.totalCount() == 1, 10000);
         QCOMPARE(lib.tracks().first().title, QStringLiteral("Elsewhere"));
-        QCOMPARE(QSettings().value(QStringLiteral("library/dir")).toString(), QDir(other).absolutePath());
+        QCOMPARE(flowSettings().value(QStringLiteral("library/dir")).toString(), QDir(other).absolutePath());
 
         lib.setMusicDir(m_music);   // back: the old tracks and mixes are all still there
         QTRY_VERIFY_WITH_TIMEOUT(!lib.scanning(), 10000);

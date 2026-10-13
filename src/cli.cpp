@@ -28,7 +28,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
-#include <QSettings>
+#include "settings.h"
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QTimer>
@@ -36,9 +36,23 @@
 #include <csignal>
 #include <cstdio>
 #include <memory>
+#ifdef _WIN32
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace {
+
+// Progress is drawn in place only when stderr is a terminal.
+bool stderrIsTty()
+{
+#ifdef _WIN32
+    return _isatty(_fileno(stderr)) != 0;
+#else
+    return isatty(STDERR_FILENO) != 0;
+#endif
+}
 
 // How long nothing may happen before a command calls it a day. A download
 // waits out the library's 2 s watcher debounce: a finished playlist becomes a
@@ -79,7 +93,7 @@ class Reporter
 public:
     explicit Reporter(bool quiet)
         : m_quiet(quiet)
-        , m_tty(isatty(STDERR_FILENO) != 0)
+        , m_tty(stderrIsTty())
     {
     }
 
@@ -166,7 +180,7 @@ struct Session
 
 QString musicDirFor(const Options &options)
 {
-    QSettings settings;   // the app's own Flow.conf
+    auto settings = flowSettings();   // the app's own Flow.conf
     QString dir = settings.value(QStringLiteral("library/dir")).toString();
     if (!options.libraryDir.isEmpty()) {
         dir = QDir(options.libraryDir).absolutePath();

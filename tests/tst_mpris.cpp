@@ -11,6 +11,7 @@
 #include <QDBusPendingReply>
 #include <QDBusVariant>
 #include <QFile>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -94,7 +95,7 @@ private slots:
         if (!QDBusConnection::sessionBus().isConnected())
             QSKIP("no session bus (run via ctest, which wraps this in dbus-run-session)");
         QVERIFY(m_tmp.isValid());
-        qputenv("XDG_CONFIG_HOME", m_tmp.filePath(QStringLiteral("config")).toUtf8());
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_tmp.filePath(QStringLiteral("config")));
         const QString music = m_tmp.filePath(QStringLiteral("music"));
         QVERIFY(QDir().mkpath(music));
         QVERIFY(writeWav(music + QStringLiteral("/a.wav"), 3));

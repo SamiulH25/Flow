@@ -14,7 +14,7 @@
 #include <QJSEngine>
 #include <QLocale>
 #include <QSet>
-#include <QSettings>
+#include "settings.h"
 #include <QStorageInfo>
 
 #include <algorithm>
@@ -192,7 +192,7 @@ Library::Library(const QString &musicDir, const QString &dbPath, const QString &
     m_collator.setCaseSensitivity(Qt::CaseInsensitive);
     m_collator.setNumericMode(true);
 
-    QSettings settings;
+    auto settings = flowSettings();
     m_navidrome.url = settings.value(QStringLiteral("navidrome/url")).toString();
     m_navidrome.user = settings.value(QStringLiteral("navidrome/user")).toString();
     m_navidrome.password = settings.value(QStringLiteral("navidrome/password")).toString();
@@ -314,6 +314,14 @@ void Library::setError(const QString &error)
     emit errorChanged();
 }
 
+QString Library::displayPath(const QString &path) const
+{
+    const QString home = QDir::homePath();
+    if (path == home || path.startsWith(home + QLatin1Char('/')))
+        return QDir::toNativeSeparators(QStringLiteral("~") + path.mid(home.size()));
+    return QDir::toNativeSeparators(path);
+}
+
 void Library::setMusicDir(const QString &dir)
 {
     // Accept both paths and file:// URLs (FolderDialog hands out URLs).
@@ -325,7 +333,7 @@ void Library::setMusicDir(const QString &dir)
     if (clean == m_musicDir)
         return;
     m_musicDir = clean;
-    QSettings().setValue(QStringLiteral("library/dir"), m_musicDir);
+    flowSettings().setValue(QStringLiteral("library/dir"), m_musicDir);
     emit musicDirChanged();
 
     reload();   // cached tracks under the new folder show up right away
@@ -1191,7 +1199,7 @@ QVariantMap Library::exportMix(qint64 mixId, const QUrl &file)
 void Library::setNavidrome(const QString &url, const QString &user, const QString &password)
 {
     m_navidrome = NavidromeServer{url.trimmed(), user.trimmed(), password};
-    QSettings settings;
+    auto settings = flowSettings();
     settings.setValue(QStringLiteral("navidrome/url"), m_navidrome.url);
     settings.setValue(QStringLiteral("navidrome/user"), m_navidrome.user);
     settings.setValue(QStringLiteral("navidrome/password"), m_navidrome.password);
@@ -1228,7 +1236,7 @@ void Library::navidromeForget()
             setError(QStringLiteral("Could not remove Navidrome tracks: ") + m_db.lastError());
         }
     }
-    QSettings settings;
+    auto settings = flowSettings();
     settings.remove(QStringLiteral("navidrome"));
     m_navidrome = {};
     m_navidromeStatus.clear();

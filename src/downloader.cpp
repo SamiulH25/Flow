@@ -11,9 +11,8 @@
 #include <QStandardPaths>
 
 #include <algorithm>
-#include <csignal>
 #include <limits>
-#include <unistd.h>
+#include "processtree.h"
 
 Downloader::Downloader(Library *library, const QString &tempRoot, const QString &program,
                        QObject *parent)
@@ -43,14 +42,11 @@ Downloader::~Downloader()
 {
     for (auto it = m_running.begin(); it != m_running.end(); ++it)
         it.value().process->disconnect(this);
-    for (auto &r : m_running) {
-        if (r.process->processId() > 0)
-            ::kill(-pid_t(r.process->processId()), SIGTERM);
-    }
+    for (auto &r : m_running)
+        ProcessTree::stop(r.process);
     for (auto &r : m_running) {
         if (!r.process->waitForFinished(2000)) {
-            if (r.process->processId() > 0)
-                ::kill(-pid_t(r.process->processId()), SIGKILL);
+            ProcessTree::stop(r.process, true);
             r.process->waitForFinished(1000);
         }
         QDir(r.temp).removeRecursively();
@@ -367,8 +363,8 @@ void Downloader::startJob(int row)
     QProcess *process = new QProcess(this);
     process->setProgram(m_program);
     process->setArguments(YtDlp::arguments(request));
-    // Own process group: cancelling must also stop the ffmpeg yt-dlp runs.
-    process->setChildProcessModifier([] { ::setpgid(0, 0); });
+    // Own process group on POSIX: cancelling must also stop the ffmpeg yt-dlp runs.
+    ProcessTree::prepare(process);
     Running running;
     running.process = process;
     running.temp = temp;
@@ -397,8 +393,8 @@ void Downloader::stopProcess(int jobId)
     if (it == m_running.end())
         return;
     QProcess *process = it.value().process;
-    if (process && process->processId() > 0)
-        ::kill(-pid_t(process->processId()), SIGTERM);
+    if (process)
+        ProcessTree::stop(process);
 }
 
 void Downloader::readOutput(int jobId, QProcess::ProcessChannel channel)

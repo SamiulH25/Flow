@@ -1,0 +1,49 @@
+app-id: io.github.SamiulH25.Flow
+runtime: org.kde.Platform
+runtime-version: '6.10'
+sdk: org.kde.Sdk
+command: flow
+
+# Local music only: the library folder is read from ~/Music (xdg-music),
+# and Navidrome streaming needs the network. Settings and the index live in the
+# sandbox's own XDG dirs (~/.var/app/io.github.SamiulH25.Flow).
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  - --share=network
+  - --filesystem=xdg-music:ro
+  # MPRIS (media keys, playerctl) registers this name on the session bus.
+  - --own-name=org.mpris.MediaPlayer2.flow
+
+modules:
+  - name: taglib
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_SHARED_LIBS=ON
+      - -DBUILD_TESTS=OFF
+    sources:
+      - type: git
+        url: https://github.com/taglib/taglib.git
+        tag: v2.3.2
+
+  - name: flow
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DFLOW_BUILD_TESTS=OFF
+    # Flatpak requires the desktop file and icon to be named after the app ID.
+    post-install:
+      - mv /app/share/applications/flow.desktop /app/share/applications/io.github.SamiulH25.Flow.desktop
+      - sed -i 's|^Icon=.*|Icon=io.github.SamiulH25.Flow|' /app/share/applications/io.github.SamiulH25.Flow.desktop
+      - mv /app/share/icons/hicolor/scalable/apps/flow.svg /app/share/icons/hicolor/scalable/apps/io.github.SamiulH25.Flow.svg
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - build-release
+          - build

@@ -4,7 +4,7 @@
 
 #include <QJSEngine>
 #include <QSet>
-#include <QSettings>
+#include "settings.h"
 #include <QUrl>
 #include <QtMultimedia/qaudio.h>
 
@@ -24,7 +24,7 @@ Player::Player(Library *library, QObject *parent)
 
     connect(&m_visualizer, &Visualizer::changed, this, &Player::visualizerChanged);
 
-    const QSettings settings;
+    const auto settings = flowSettings();
     m_volume = qBound(0.0, settings.value(QStringLiteral("player/volume"), 0.7).toDouble(), 1.0);
     // "player/repeat" (bool) predates repeat-one; read it as off / all.
     const int legacy = settings.value(QStringLiteral("player/repeat"), false).toBool() ? RepeatAll : RepeatOff;
@@ -83,7 +83,7 @@ void Player::saveQueue() const
     QVariantList ids;
     for (int i = 0; i < m_queue.count(); ++i)
         ids.append(m_queue.at(i)->id);
-    QSettings settings;
+    auto settings = flowSettings();
     settings.setValue(QStringLiteral("queue/ids"), ids);
     settings.setValue(QStringLiteral("queue/index"), m_queue.currentIndex());
     // Before the media has loaded, m_player reports 0; keep the restored spot.
@@ -93,7 +93,7 @@ void Player::saveQueue() const
 
 void Player::restoreQueue()
 {
-    const QSettings settings;
+    const auto settings = flowSettings();
     const QVariantList ids = settings.value(QStringLiteral("queue/ids")).toList();
     const int savedIndex = settings.value(QStringLiteral("queue/index"), -1).toInt();
     QList<Track> tracks;
@@ -160,7 +160,7 @@ void Player::setError(const QString &error)
 
 void Player::saveSettings() const
 {
-    QSettings settings;
+    auto settings = flowSettings();
     settings.setValue(QStringLiteral("player/volume"), m_volume);
     settings.setValue(QStringLiteral("player/repeatMode"), m_repeatMode);
     settings.remove(QStringLiteral("player/repeat"));

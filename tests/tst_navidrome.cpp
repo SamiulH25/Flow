@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QSettings>
 #include <QFileInfo>
 #include <QHash>
 #include <QHostAddress>
@@ -260,7 +261,7 @@ private slots:
     {
         QVERIFY(m_tmp.isValid());
         // Library and QSettings must never touch the developer's real Flow.conf.
-        qputenv("XDG_CONFIG_HOME", m_tmp.filePath(QStringLiteral("config")).toUtf8());
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_tmp.filePath(QStringLiteral("config")));
         QVERIFY(m_fake.start());
         m_fake.handler = [this](const QString &method, const QUrlQuery &query) {
             return serveCatalogue(method, query, m_catalogue);

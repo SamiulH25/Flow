@@ -9,7 +9,7 @@ import QtQuick.Shapes
 Item {
     id: icon
     property string name
-    property color color: "#f4f1ea"
+    property color color: Theme.ink
     property real size: 18
     implicitWidth: size
     implicitHeight: size

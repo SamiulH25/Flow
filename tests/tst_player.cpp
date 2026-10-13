@@ -3,6 +3,7 @@
 #include "player.h"
 
 #include <QFile>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -66,7 +67,7 @@ private slots:
     {
         QVERIFY(m_tmp.isValid());
         // Keep QSettings (volume/shuffle/repeat) out of the real config.
-        qputenv("XDG_CONFIG_HOME", m_tmp.filePath(QStringLiteral("config")).toUtf8());
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_tmp.filePath(QStringLiteral("config")));
         const QString music = m_tmp.filePath(QStringLiteral("music"));
         QVERIFY(QDir().mkpath(music));
         QVERIFY(writeWav(music + QStringLiteral("/a.wav"), 2));

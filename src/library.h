@@ -119,6 +119,7 @@ class Library : public QObject
     Q_PROPERTY(bool scanning READ scanning NOTIFY scanningChanged)
     Q_PROPERTY(int scanProgress READ scanProgress NOTIFY scanProgressChanged)
     Q_PROPERTY(QString musicDir READ musicDir WRITE setMusicDir NOTIFY musicDirChanged)
+    Q_PROPERTY(QUrl musicDirUrl READ musicDirUrl NOTIFY musicDirChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
     Q_PROPERTY(QString storageText READ storageText NOTIFY countsChanged)
     Q_PROPERTY(qreal storageUsed READ storageUsed NOTIFY countsChanged)
@@ -155,6 +156,9 @@ public:
     bool scanning() const { return m_scanThread != nullptr; }
     int scanProgress() const { return m_scanProgress; }
     QString musicDir() const { return m_musicDir; }
+    QUrl musicDirUrl() const { return QUrl::fromLocalFile(m_musicDir); }
+    // The home folder shown as "~", native separators: "~/Music", "C:\Users\me\Music".
+    Q_INVOKABLE QString displayPath(const QString &path) const;
     // Switches the library folder: shows what is already indexed there, then
     // rescans. Other folders' tracks (and their likes / mixes) stay in the index.
     void setMusicDir(const QString &dir);
