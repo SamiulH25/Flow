@@ -104,8 +104,11 @@ void Mixer::flush()
         m_count = 0;
         m_mastering.reset();
     }
+    // QAudioSink::reset() stops the stream for good on the PulseAudio backend
+    // (reset() == stop + discard), and a stopped sink never pulls again. Close
+    // it here; the next tapped buffer reopens it via process().
     if (m_sink)
-        m_sink->reset();
+        stopSink();
 }
 
 void Mixer::startSink()

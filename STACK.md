@@ -183,7 +183,10 @@ Settings + saved queue: `~/.config/Flow/Flow.conf`.
   −0.45 dBFS — then played on a second `QAudioSink` at the tap's fixed format
   (48 kHz stereo float). Two streams on one device share a clock, so the tap
   rate and the sink's consumption do not drift; a 2 s ring absorbs the
-  renderer's bursts and drops the oldest audio if the sink stalls. The player's
+  renderer's bursts and drops the oldest audio if the sink stalls. A seek or a
+  track change closes that sink and lets the next tapped buffer reopen it:
+  `QAudioSink::reset()` is `stop + discard` on the PulseAudio backend, and a
+  stopped sink never pulls again, so "flush" cannot be implemented with it. The player's
   own sink stays muted (its volume is zeroed too, so a fallback can never
   blast). The dock's FULL chip toggles it.
   Because the whole design leans on the ffmpeg backend's tap, a backend without

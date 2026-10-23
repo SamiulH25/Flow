@@ -173,6 +173,13 @@ if(FLOW_BUILD_TESTS)
     target_link_libraries(tst_mastering PRIVATE Qt6::Test)
     add_test(NAME tst_mastering COMMAND tst_mastering)
 
+    # The mixer's sink lifecycle (needs an output device; the test skips without one).
+    qt_add_executable(tst_mixer tests/tst_mixer.cpp
+        src/mastering.h src/mastering.cpp src/mixer.h src/mixer.cpp)
+    target_include_directories(tst_mixer PRIVATE src)
+    target_link_libraries(tst_mixer PRIVATE Qt6::Multimedia Qt6::Test)
+    add_test(NAME tst_mixer COMMAND tst_mixer)
+
     qt_add_executable(tst_visualizer tests/tst_visualizer.cpp src/visualizer.h src/visualizer.cpp)
     target_include_directories(tst_visualizer PRIVATE src)
     target_link_libraries(tst_visualizer PRIVATE Qt6::Multimedia Qt6::Test)
