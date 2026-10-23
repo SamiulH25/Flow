@@ -1,7 +1,12 @@
-// Colour themes. A preset is eight base colours plus an accent policy; every
-// other tone in the UI is derived from them (mixes of panel with ink), so light
-// and dark presets both work without per-theme tuning. The choice is kept in
-// Flow.conf under [appearance].
+// Colour themes. A preset is eight base colours plus an accent policy, and may
+// set the shape and surface knobs below; every other tone in the UI is derived
+// from the base colours (mixes of panel with ink), so light and dark presets
+// both work without per-theme tuning. The choice is kept in Flow.conf under
+// [appearance].
+//
+// Shape:   radiusScale (0 = square corners), borderWidth, bevel ("none" | "raised" | "sunken").
+// Surface: surfaceAlpha (< 1 makes bg, panel and panel2 translucent),
+//          glass (ask the platform for a blur behind translucent surfaces, see src/windowfx.*).
 pragma Singleton
 import QtQuick
 import QtCore
@@ -14,6 +19,9 @@ Item {
         category: "appearance"
         property string themeId: "graphite"
     }
+
+    // Shape and surface defaults; a preset lists only the knobs it changes.
+    readonly property var defaults: ({ radiusScale: 1, borderWidth: 1, bevel: "none", surfaceAlpha: 1, glass: false })
 
     readonly property var presets: [
         { id: "graphite", name: "Graphite", note: "Near-black with mint. The accent follows the cover.",
@@ -44,36 +52,51 @@ Item {
           bg: "#0a100c", panel: "#121b14", panel2: "#0e160f", line: "#1e2b21", line2: "#2e4031",
           ink: "#eef3e4", mut: "#9aaa90", dim: "#62735c", soft: "#cfdac4", danger: "#ffa08c",
           accent: "#ffb48a", coverAccent: true },
-        { id: "xp", name: "Luna XP", note: "Beige chrome and Start-menu blue. Light.",
+        { id: "xp", name: "Luna XP", note: "Beige chrome and Start-menu blue. Light, softly rounded.",
           bg: "#ece9d8", panel: "#f7f6f1", panel2: "#e3e0d0", line: "#c4bfa8", line2: "#9e9a86",
           ink: "#1a1a1a", mut: "#4f4c44", dim: "#7d7a6e", soft: "#2b2a26", danger: "#c00000",
-          accent: "#245edb", coverAccent: false },
+          accent: "#245edb", coverAccent: false, radiusScale: 0.5 },
         { id: "win95", name: "Classic 95", note: "Grey bevels and navy selection, the way it was in '95.",
           bg: "#c0c0c0", panel: "#d4d4d4", panel2: "#b4b4b4", line: "#808080", line2: "#404040",
           ink: "#000000", mut: "#2e2e2e", dim: "#5a5a5a", soft: "#111111", danger: "#b00000",
-          accent: "#000080", coverAccent: false },
-        { id: "aero", name: "Aero Glass", note: "Deep glass blue with a bright Aero glow.",
+          accent: "#000080", coverAccent: false, radiusScale: 0, borderWidth: 2, bevel: "raised" },
+        { id: "aero", name: "Aero Glass", note: "Deep glass blue with a bright Aero glow. Blurs behind the window where the platform allows.",
           bg: "#0f1d2b", panel: "#18293c", panel2: "#132234", line: "#2a4560", line2: "#3b5f80",
           ink: "#eef6ff", mut: "#98b3cc", dim: "#5f7d96", soft: "#d2e3f3", danger: "#ff8577",
-          accent: "#3fb6ff", coverAccent: false },
-        { id: "fluent", name: "Fluent Mica", note: "Charcoal mica with the Windows 11 accent blue.",
+          accent: "#3fb6ff", coverAccent: false, radiusScale: 1.3, surfaceAlpha: 0.78, glass: true },
+        { id: "fluent", name: "Fluent Mica", note: "Charcoal mica with the Windows 11 accent blue. Mica backdrop on Windows 11.",
           bg: "#202020", panel: "#2c2c2c", panel2: "#1f1f1f", line: "#3b3b3b", line2: "#4d4d4d",
           ink: "#ffffff", mut: "#c7c7c7", dim: "#8c8c8c", soft: "#e6e6e6", danger: "#ff99a4",
-          accent: "#60cdff", coverAccent: false },
+          accent: "#60cdff", coverAccent: false, surfaceAlpha: 0.86, glass: true },
         { id: "bsod", name: "Blue Screen", note: "A fatal error you'll want to keep. Yellow on blue.",
           bg: "#0000aa", panel: "#0c0cb4", panel2: "#000090", line: "#5a5ae0", line2: "#8080ff",
           ink: "#ffffff", mut: "#c4c4ff", dim: "#8f8fe0", soft: "#e8e8ff", danger: "#ff7070",
-          accent: "#ffff55", coverAccent: false }
-    ]
+          accent: "#ffff55", coverAccent: false },
+        { id: "wireframe", name: "Wireframe", note: "Hairline-heavy frames, square corners, no fill. Light.",
+          bg: "#f4f4f4", panel: "#ffffff", panel2: "#ececec", line: "#111111", line2: "#111111",
+          ink: "#111111", mut: "#4a4a4a", dim: "#808080", soft: "#222222", danger: "#cc0000",
+          accent: "#0044cc", coverAccent: false, radiusScale: 0, borderWidth: 2 }
+    ].map(p => Object.assign({}, defaults, p))
 
     readonly property var preset: presets.find(p => p.id === prefs.themeId) || presets[0]
     readonly property string key: preset.id
     readonly property string name: preset.name
     readonly property string note: preset.note
 
-    readonly property color bg: preset.bg
-    readonly property color panel: preset.panel
-    readonly property color panel2: preset.panel2
+    // Shape and surface knobs, read by the UI.
+    readonly property int bw: preset.borderWidth
+    readonly property string bevel: preset.bevel
+    readonly property real surfaceAlpha: preset.surfaceAlpha
+    readonly property bool glass: preset.glass
+    // Corner radius for a design radius n (the default look is radiusScale 1).
+    function r(n) { return Math.round(n * preset.radiusScale); }
+
+    // Surfaces carry the preset's alpha; text and lines stay opaque.
+    function tint(c) { const x = Qt.color(c); return Qt.rgba(x.r, x.g, x.b, surfaceAlpha); }
+
+    readonly property color bg: tint(preset.bg)
+    readonly property color panel: tint(preset.panel)
+    readonly property color panel2: tint(preset.panel2)
     readonly property color line: preset.line
     readonly property color line2: preset.line2
     readonly property color ink: preset.ink
@@ -83,6 +106,10 @@ Item {
     readonly property color danger: preset.danger
     readonly property color accent: preset.accent
     readonly property bool coverAccent: preset.coverAccent
+
+    // Bevel edges: light from the top-left, shadow to the bottom-right. Opaque, from the preset's panel.
+    readonly property color hi: mix(preset.panel, "#ffffff", 0.5)
+    readonly property color sh: mix(preset.panel, "#000000", 0.5)
 
     // Derived tones, from panel towards ink. Hover, selection, tracks and idle marks.
     readonly property color hovSoft: mix(panel, ink, 0.025)
@@ -101,10 +128,10 @@ Item {
 
     function select(key) { prefs.themeId = key; }
 
-    // Plain RGB blend: plenty for tints a few percent deep.
+    // Plain RGBA blend: plenty for tints a few percent deep.
     function mix(a, b, t) {
         const x = Qt.color(a), y = Qt.color(b);
-        return Qt.rgba(x.r + (y.r - x.r) * t, x.g + (y.g - x.g) * t, x.b + (y.b - x.b) * t, 1);
+        return Qt.rgba(x.r + (y.r - x.r) * t, x.g + (y.g - x.g) * t, x.b + (y.b - x.b) * t, x.a + (y.a - x.a) * t);
     }
 
     // Black or white, whichever has the better WCAG contrast against c.

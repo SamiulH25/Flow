@@ -10,11 +10,15 @@ ships a headless CLI. Built for Wayland (Hyprland), with a custom QML interface.
 
 - **Library:** TagLib scan into SQLite, incremental rescans, folder watching,
   likes, embedded and folder cover art, search and format filters.
-- **Playback:** `QMediaPlayer` (FFmpeg backend), seek, volume, shuffle,
-  repeat, play queue with drag-reorder, synced lyrics, saved queue on launch.
+- **Playback:** `QMediaPlayer` (FFmpeg backend), seek, volume, audio device
+  switching with hotplug and reconnect fallback, shuffle, repeat, play queue with
+  drag-reorder, synced lyrics, saved queue on launch.
 - **Mixes:** create, rename and reorder mixes; M3U import and export.
 - **Visualizer:** live 48-band spectrum and oscilloscope in the now-playing panel.
 - **Waveform and loudness:** cached per track in the index.
+- **Full sound:** the decoded PCM runs through a weight/presence EQ, RMS
+  compression, a touch of stereo width and a limiter before it reaches the
+  sound card. The dock's FULL chip A/Bs it against plain output.
 - **Navidrome:** browse and stream a Subsonic server. Nothing is copied to disk.
 - **Downloads:** YouTube / YouTube Music links via `yt-dlp` (optional).
 - **Metadata enrichment:** MusicBrainz and Cover Art Archive, stored in the
@@ -23,8 +27,8 @@ ships a headless CLI. Built for Wayland (Hyprland), with a custom QML interface.
   Classic 95, Aero Glass, Fluent Mica, Blue Screen), picked from the Appearance
   card in the library rail. Remembered in `Flow.conf`.
 - **MPRIS:** `playerctl`, Hyprland keybinds and shell widgets.
-- **`flow-cli`:** headless front end for scanning, listing, mixes, downloads
-  and diagnostics.
+- **`flow-cli`:** headless front end for scanning, listing, mixes, downloads,
+  devices and diagnostics.
 
 ## Build
 

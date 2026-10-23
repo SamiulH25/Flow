@@ -169,17 +169,40 @@ Settings + saved queue: `~/.config/Flow/Flow.conf`.
 - Loudness: the pass that draws the waveform also measures the track — RMS in
   dBFS and the highest sample — and caches both in the index. The now-playing
   panel shows them; the dock's MATCH chip turns a track louder than the target
-  down to meet it. It is deliberately one-sided: `QMediaPlayer` clamps volume
-  to 0..1 and has no gain stage, so **a player cannot turn a track up past full
-  scale** — a real >100% boost would mean replacing the playback engine with a
-  hand-rolled `QAudioSink` pipeline. Matching therefore levels the library down
-  to the target and leaves quiet tracks where the user put them.
+  down to meet it. Matching is still one-sided: the mixer below has a gain
+  stage, but a track-level boost would have to be applied per track and could
+  not be undone by the limiter without changing the sound, so quiet tracks are
+  left where the user put them and the library is levelled down instead.
 
-Deliberately not done: EQ (same reason as the boost — no insert point in
-QMediaPlayer), AcoustID fingerprinting, and any write-back of tags to files.
+- Full sound (`Mixer` + `Mastering`): `QMediaPlayer` still decodes and still
+  owns the clock, but its `QAudioOutput` is muted and the decoded PCM is tapped
+  from `QAudioBufferOutput` *before* the output's volume stage. That tap is
+  pushed through a fixed chain — low shelf (100 Hz, +4 dB), presence bell
+  (3.2 kHz, +1.8 dB), air shelf (11 kHz, +1 dB), stereo-linked RMS compression
+  (2:1, −22 dBFS, 6 dB makeup), mid/side width ×1.10 and a peak limiter at
+  −0.45 dBFS — then played on a second `QAudioSink` at the tap's fixed format
+  (48 kHz stereo float). Two streams on one device share a clock, so the tap
+  rate and the sink's consumption do not drift; a 2 s ring absorbs the
+  renderer's bursts and drops the oldest audio if the sink stalls. The player's
+  own sink stays muted (its volume is zeroed too, so a fallback can never
+  blast). The dock's FULL chip toggles it.
+  Because the whole design leans on the ffmpeg backend's tap, a backend without
+  it (gstreamer) would otherwise play silence: on the first play the player
+  arms a 1.5 s watchdog, and if no buffer has reached the mixer it unmutes the
+  plain output, reports `fullnessActive` false and leaves the mode off for the
+  session. A sink that refuses to open takes the same exit. The tap leads the
+  player's clock by the backend's ~110 ms buffer and the mixer's sink adds its
+  own ~40–80 ms, so the mix is a few dozen ms ahead of `Player.position` —
+  inaudible for music and lyrics, and not compensated.
+  The chain is 48 kHz fixed: asking the tap for the device format would put a
+  resampler on every buffer and fork the DSP by sample format.
 
-Tests: `tst_visualizer` (FFT bin placement, band mapping, scope envelope, empty
-and unknown windows) and `tst_enricher` (matching rules, yt-dlp title shapes,
+Deliberately not done: a user-editable EQ (the chain is one taste, not a
+parametric EQ), AcoustID fingerprinting, and any write-back of tags to files.
+
+Tests: `tst_mastering` (low-end vs presence balance, compression of a 20 dB
+step, transient limiting, silence), `tst_visualizer` (FFT bin placement, band
+mapping, scope envelope, empty and unknown windows) and `tst_enricher` (matching rules, yt-dlp title shapes,
 compilations, store + survive a rescan, queue pacing, retry on 5xx) run against
 a fake backend, so neither needs a network connection.
 

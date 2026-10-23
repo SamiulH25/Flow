@@ -54,12 +54,6 @@ Visualizer::Visualizer(QObject *parent)
     for (int i = 0; i < kScopeValues; ++i)
         m_scopeList.append(0.0);
 
-    // Deliberately without a context object: the samples point into the
-    // decoder's own frame, which is only alive while this call runs, and a
-    // context object would let Qt hand the buffer over asynchronously. The
-    // connection dies with m_tap, a member, so it cannot outlive the object.
-    QObject::connect(&m_tap, &QAudioBufferOutput::audioBufferReceived,
-                     [this](const QAudioBuffer &b) { onBuffer(b); });
     m_frameTimer.setTimerType(Qt::PreciseTimer);
     m_frameTimer.setInterval(kFrameMs);
     connect(&m_frameTimer, &QTimer::timeout, this, &Visualizer::onFrame);
@@ -243,7 +237,7 @@ void Visualizer::latestWindow(int frames, std::vector<float> &out) const
         out[size_t(i)] = m_ring[size_t((start + i) % kFftSize)];
 }
 
-void Visualizer::onBuffer(const QAudioBuffer &buffer)
+void Visualizer::append(const QAudioBuffer &buffer)
 {
     QMutexLocker lock(&m_mutex);
     appendSamples(buffer);

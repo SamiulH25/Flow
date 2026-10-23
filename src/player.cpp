@@ -5,6 +5,8 @@
 #include <QJSEngine>
 #include <QSet>
 #include "settings.h"
+#include <QAudioDevice>
+#include <QMediaDevices>
 #include <QUrl>
 #include <QtMultimedia/qaudio.h>
 
@@ -18,11 +20,27 @@ Player::Player(Library *library, QObject *parent)
     , m_queue(this)
 {
     m_player.setAudioOutput(&m_audio);
-    // Live PCM for the now-playing visualizer (ffmpeg backend only; without it
-    // the tap simply never fires and the analyser rests at zero).
-    m_player.setAudioBufferOutput(m_visualizer.output());
+    // One tap feeds both the now-playing analyser and the full-sound mixer. It
+    // sits before QAudioOutput's volume stage, so the mixer always sees the
+    // decoded level, never the (muted) output's. Direct connections: the
+    // buffer points into the decoder's frame and dies when the signal returns.
+    m_player.setAudioBufferOutput(&m_tap);
+    connect(&m_tap, &QAudioBufferOutput::audioBufferReceived,
+            &m_visualizer, &Visualizer::append, Qt::DirectConnection);
+    connect(&m_tap, &QAudioBufferOutput::audioBufferReceived,
+            &m_mixer, &Mixer::process, Qt::DirectConnection);
+    connect(&m_mixer, &Mixer::failed, this, &Player::onMixerFailed);
 
     connect(&m_visualizer, &Visualizer::changed, this, &Player::visualizerChanged);
+
+    m_dspWatchdog.setSingleShot(true);
+    m_dspWatchdog.setInterval(1500);
+    connect(&m_dspWatchdog, &QTimer::timeout, this, [this] {
+        if (fullnessActive() && !m_mixer.running()
+            && m_player.playbackState() == QMediaPlayer::PlayingState) {
+            onMixerFailed();
+        }
+    });
 
     const auto settings = flowSettings();
     m_volume = qBound(0.0, settings.value(QStringLiteral("player/volume"), 0.7).toDouble(), 1.0);
@@ -31,6 +49,10 @@ Player::Player(Library *library, QObject *parent)
     m_repeatMode = qBound(0, settings.value(QStringLiteral("player/repeatMode"), legacy).toInt(), 2);
     m_queue.setShuffled(settings.value(QStringLiteral("player/shuffle"), false).toBool());
     m_matchLoudness = settings.value(QStringLiteral("player/matchLoudness"), false).toBool();
+    m_fullness = settings.value(QStringLiteral("player/fullness"), true).toBool();
+    m_audioDeviceId = settings.value(QStringLiteral("player/audioDevice")).toString();
+    updateAudioDevice(true);
+    connect(&m_mediaDevices, &QMediaDevices::audioOutputsChanged, this, &Player::onAudioOutputsChanged);
     applyMatch();   // no track yet: sets the plain slider volume
 
     // queueChanged covers every edit so bindings on queueAt() stay fresh.
@@ -40,7 +62,7 @@ Player::Player(Library *library, QObject *parent)
     connect(&m_queue, &PlayQueue::modelReset, this, &Player::queueChanged);
     connect(&m_queue, &PlayQueue::dataChanged, this, &Player::queueChanged);
 
-    connect(&m_player, &QMediaPlayer::playbackStateChanged, this, &Player::playingChanged);
+    connect(&m_player, &QMediaPlayer::playbackStateChanged, this, &Player::onPlaybackStateChanged);
     connect(&m_player, &QMediaPlayer::durationChanged, this, &Player::durationChanged);
     connect(&m_player, &QMediaPlayer::positionChanged, this, [this] {
         emit positionChanged();
@@ -166,6 +188,8 @@ void Player::saveSettings() const
     settings.remove(QStringLiteral("player/repeat"));
     settings.setValue(QStringLiteral("player/shuffle"), m_queue.isShuffled());
     settings.setValue(QStringLiteral("player/matchLoudness"), m_matchLoudness);
+    settings.setValue(QStringLiteral("player/fullness"), m_fullness);
+    settings.setValue(QStringLiteral("player/audioDevice"), m_audioDeviceId);
 }
 
 void Player::setVolume(qreal volume)
@@ -203,8 +227,72 @@ void Player::applyMatch()
     const float gain = (m_matchLoudness && t && t->hasLoudness()) ? Waveform::matchGain(t->rmsDb)
                                                                   : 1.0f;
     m_matchGain = gain;
-    m_audio.setVolume(outputVolume(m_volume, gain));
+    const float volume = outputVolume(m_volume, gain);
+
+    if (fullnessActive()) {
+        // The player's own sink is only a clock now; the mixer owns the sound.
+        m_audio.setMuted(true);
+        m_audio.setVolume(0.0f);
+        m_mixer.setEnabled(true);
+        m_mixer.setVolume(volume);
+    } else {
+        m_audio.setVolume(volume);
+        m_audio.setMuted(false);
+        m_mixer.setEnabled(false);
+    }
     emit matchChanged();
+}
+
+void Player::setFullness(bool on)
+{
+    if (on == m_fullness)
+        return;
+    m_fullness = on;
+    if (on)
+        m_dspFailed = false;   // the last failure may have been a missing device
+    m_mixer.flush();
+    applyMatch();
+    saveSettings();
+    emit fullnessChanged();
+}
+
+void Player::onMixerFailed()
+{
+    if (m_dspFailed)
+        return;
+    m_dspFailed = true;
+    m_mixer.setEnabled(false);
+    applyMatch();   // unmute the player, plain output
+    qWarning("flow: audio tap unavailable; full sound is off for this session");
+    emit fullnessChanged();
+}
+
+void Player::armDspWatchdog()
+{
+    if (fullnessActive() && !m_mixer.running())
+        m_dspWatchdog.start();
+}
+
+void Player::onPlaybackStateChanged()
+{
+    switch (m_player.playbackState()) {
+    case QMediaPlayer::PlayingState:
+        if (fullnessActive()) {
+            m_mixer.resume();
+            armDspWatchdog();
+        }
+        break;
+    case QMediaPlayer::PausedState:
+        m_mixer.suspend();
+        m_dspWatchdog.stop();
+        break;
+    case QMediaPlayer::StoppedState:
+        m_mixer.suspend();
+        m_mixer.flush();
+        m_dspWatchdog.stop();
+        break;
+    }
+    emit playingChanged();
 }
 
 void Player::setMatchLoudness(bool on)
@@ -264,6 +352,7 @@ void Player::loadCurrent(bool autoplay)
     const Track *t = m_queue.current();
     const quint64 uid = m_queue.uidAt(m_queue.currentIndex());
 
+    m_mixer.flush();
     if (!t) {
         m_player.stop();
         m_player.setSource(QUrl());
@@ -500,6 +589,7 @@ void Player::seek(qreal seconds)
     const qreal len = duration();
     seconds = qBound(0.0, seconds, len > 0 ? len : seconds);
     m_pendingSeekMs = -1;   // the user's seek wins over a restored position
+    m_mixer.flush();        // whatever was queued belongs to the old position
     m_player.setPosition(qint64(seconds * 1000));
     emit seeked(seconds);
 }
@@ -564,4 +654,100 @@ QVariantMap Player::queueAt(int queueRow) const
 {
     const Track *t = m_queue.at(queueRow);
     return TrackRoles::toVariantMap(t ? *t : Track());
+}
+
+void Player::updateAudioDevice(bool force)
+{
+    const QList<QAudioDevice> outputs = QMediaDevices::audioOutputs();
+    const QAudioDevice defaultDevice = QMediaDevices::defaultAudioOutput();
+    QAudioDevice targetDevice = defaultDevice;
+
+    if (!m_audioDeviceId.isEmpty()) {
+        const QByteArray targetId = m_audioDeviceId.toUtf8();
+        for (const QAudioDevice &d : outputs) {
+            if (d.id() == targetId) {
+                targetDevice = d;
+                break;
+            }
+        }
+    }
+
+    if (!targetDevice.isNull() && (force || m_audio.device() != targetDevice)) {
+        m_audio.setDevice(targetDevice);
+        m_mixer.setDevice(targetDevice);
+        applyMatch();
+        emit audioDeviceChanged();
+    }
+}
+
+void Player::onAudioOutputsChanged()
+{
+    updateAudioDevice(false);
+    emit audioDevicesChanged();
+}
+
+void Player::setAudioDevice(const QString &id)
+{
+    if (m_audioDeviceId == id)
+        return;
+    m_audioDeviceId = id;
+    saveSettings();
+    updateAudioDevice(true);
+    emit audioDevicesChanged();
+}
+
+QString Player::currentAudioDevice() const
+{
+    const QString desc = m_audio.device().description();
+    if (!desc.isEmpty())
+        return desc;
+    const QString defDesc = QMediaDevices::defaultAudioOutput().description();
+    return defDesc.isEmpty() ? QStringLiteral("Default") : defDesc;
+}
+
+QVariantList Player::audioDevices() const
+{
+    QVariantList list;
+    const QList<QAudioDevice> outputs = QMediaDevices::audioOutputs();
+    const QAudioDevice def = QMediaDevices::defaultAudioOutput();
+    const QAudioDevice current = m_audio.device();
+
+    QVariantMap defMap;
+    defMap.insert(QStringLiteral("id"), QString());
+    const QString defDesc = def.description();
+    defMap.insert(QStringLiteral("name"), defDesc.isEmpty()
+                      ? QStringLiteral("System Default")
+                      : QStringLiteral("System Default (%1)").arg(defDesc));
+    defMap.insert(QStringLiteral("isDefault"), true);
+    defMap.insert(QStringLiteral("selected"), m_audioDeviceId.isEmpty());
+    defMap.insert(QStringLiteral("active"), m_audioDeviceId.isEmpty() || current == def);
+    list.append(defMap);
+
+    bool configuredFound = m_audioDeviceId.isEmpty();
+    for (const QAudioDevice &d : outputs) {
+        if (d.isNull())
+            continue;
+        const QString id = QString::fromUtf8(d.id());
+        if (id == m_audioDeviceId)
+            configuredFound = true;
+        QVariantMap m;
+        m.insert(QStringLiteral("id"), id);
+        m.insert(QStringLiteral("name"), d.description());
+        m.insert(QStringLiteral("isDefault"), d.isDefault());
+        m.insert(QStringLiteral("selected"), id == m_audioDeviceId);
+        m.insert(QStringLiteral("active"), d == current);
+        list.append(m);
+    }
+
+    if (!configuredFound && !m_audioDeviceId.isEmpty()) {
+        QVariantMap m;
+        m.insert(QStringLiteral("id"), m_audioDeviceId);
+        m.insert(QStringLiteral("name"), QStringLiteral("%1 (disconnected)").arg(m_audioDeviceId));
+        m.insert(QStringLiteral("isDefault"), false);
+        m.insert(QStringLiteral("selected"), true);
+        m.insert(QStringLiteral("active"), false);
+        list.append(m);
+    }
+
+    return list;
 }

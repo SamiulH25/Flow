@@ -2,6 +2,7 @@
 #include "library.h"
 #include "player.h"
 
+#include "settings.h"
 #include <QFile>
 #include <QSettings>
 #include <QSignalSpy>
@@ -292,6 +293,37 @@ private slots:
                 }
             }
         }
+    }
+
+    void audioDeviceSelectionAndFallback()
+    {
+        Player &p = *m_player;
+        const QVariantList devs = p.audioDevices();
+        QVERIFY(!devs.isEmpty());
+        // First entry is always System Default
+        QCOMPARE(devs.first().toMap().value(QStringLiteral("id")).toString(), QString());
+        QVERIFY(devs.first().toMap().value(QStringLiteral("isDefault")).toBool());
+        QVERIFY(!p.currentAudioDevice().isEmpty());
+
+        QSignalSpy devSpy(&p, &Player::audioDeviceChanged);
+        QSignalSpy devsSpy(&p, &Player::audioDevicesChanged);
+
+        // Selecting a nonexistent device triggers fallback to default and keeps the id recorded
+        p.setAudioDevice(QStringLiteral("nonexistent-device-xyz"));
+        QCOMPARE(p.audioDevice(), QStringLiteral("nonexistent-device-xyz"));
+        QVERIFY(devSpy.count() >= 1);
+        QVERIFY(devsSpy.count() >= 1);
+
+        // Reverting to empty string restores system default
+        p.setAudioDevice(QString());
+        QCOMPARE(p.audioDevice(), QString());
+
+        // Test persistence in settings
+        p.setAudioDevice(QStringLiteral("test-device-id"));
+        auto settings = flowSettings();
+        QCOMPARE(settings.value(QStringLiteral("player/audioDevice")).toString(),
+                 QStringLiteral("test-device-id"));
+        p.setAudioDevice(QString());
     }
 
     void cleanupTestCase()

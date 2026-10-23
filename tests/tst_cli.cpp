@@ -242,6 +242,18 @@ private slots:
         // An option that is known but wrong is still a usage error.
         QCOMPARE(run({QStringLiteral("list"), QStringLiteral("--sort"), QStringLiteral("nope")}).code, 2);
     }
+
+    void listAudioDevices()
+    {
+        Result result = run({QStringLiteral("devices")});
+        QCOMPARE(result.code, 0);
+
+        result = run({QStringLiteral("devices"), QStringLiteral("--json")});
+        QCOMPARE(result.code, 0);
+        const QJsonObject json = result.json();
+        QVERIFY(json.contains(QStringLiteral("devices")));
+        QVERIFY(json.value(QStringLiteral("devices")).isArray());
+    }
 };
 
 QTEST_GUILESS_MAIN(TestCli)

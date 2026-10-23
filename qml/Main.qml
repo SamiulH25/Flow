@@ -17,6 +17,8 @@ ApplicationWindow {
     visible: true
     title: Player.hasTrack ? cur.t + " — Flow" : "Flow"
     color: bg
+    Component.onCompleted: WindowFx.applyGlass(root, Theme.glass)
+    Connections { target: Theme; function onGlassChanged() { WindowFx.applyGlass(root, Theme.glass) } }
 
     // ---- theme: presets and derived tones live in Theme.qml ----
     readonly property color bg: Theme.bg
@@ -98,7 +100,7 @@ ApplicationWindow {
         property string source: ""
         property color c1: Theme.track
         property color c2: Theme.panel2
-        property real radius: 10
+        property real radius: Theme.r(10)
         property bool accent: true
         property real accentX: 30
         property real accentY: -20
@@ -158,8 +160,8 @@ ApplicationWindow {
     // Volume slider: drag or scroll. Shared by the dock and its narrow-window popup.
     component VolumeBar: Item {
         width: 90; height: 16
-        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: Theme.track }
-        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width * Player.volume; height: 4; radius: 2; color: soft }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: Theme.r(2); color: Theme.track }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width * Player.volume; height: 4; radius: Theme.r(2); color: soft }
         MouseArea {
             anchors.fill: parent
             onPressed: mouse => Player.volume = mouse.x / width
@@ -204,7 +206,7 @@ ApplicationWindow {
         implicitWidth: 36; implicitHeight: 36
         radius: width / 2
         color: lit ? litBg : hover.containsMouse ? Theme.sel : "transparent"
-        border.color: lit ? litLine : "transparent"; border.width: 1
+        border.color: lit ? litLine : "transparent"; border.width: Theme.bw
         Icon { anchors.centerIn: parent; name: ib.icon; size: ib.iconSize; color: ib.lit ? acc : ib.iconColor }
         MouseArea { id: hover; anchors.fill: parent; hoverEnabled: true; onClicked: ib.clicked() }
         ToolTip.visible: tip !== "" && hover.containsMouse
@@ -223,9 +225,9 @@ ApplicationWindow {
         signal clicked
         implicitHeight: 26
         implicitWidth: pillRow.implicitWidth + 20
-        radius: 8
+        radius: Theme.r(8)
         color: solid ? (pillHover.containsMouse ? ink : acc) : pillHover.containsMouse ? Theme.hovStrong : Theme.chip
-        border.color: solid ? "transparent" : line2; border.width: 1
+        border.color: solid ? "transparent" : line2; border.width: Theme.bw
         Row {
             id: pillRow
             anchors.centerIn: parent
@@ -251,9 +253,9 @@ ApplicationWindow {
             decodeSize: 300
             Row {
                 x: 8; y: 8; spacing: 5
-                Rectangle { height: 18; width: fmtLabel.implicitWidth + 14; radius: 9; color: "#000000a0"
+                Rectangle { height: 18; width: fmtLabel.implicitWidth + 14; radius: Theme.r(9); color: "#000000a0"
                     Text { id: fmtLabel; anchors.centerIn: parent; text: f; color: "#fff"; font.pixelSize: 9; font.family: mono } }
-                Rectangle { height: 18; width: hiLabel.implicitWidth + 14; radius: 9; color: acc; visible: hi
+                Rectangle { height: 18; width: hiLabel.implicitWidth + 14; radius: Theme.r(9); color: acc; visible: hi
                     Text { id: hiLabel; anchors.centerIn: parent; text: "HI-RES"; color: accText; font.pixelSize: 9; font.family: mono; font.bold: true } }
             }
         }
@@ -266,7 +268,7 @@ ApplicationWindow {
             onClicked: { albumsFromGrid = card.fromGrid; page = "tracks"; Library.showAlbum(albumIndex); }
         }
         Rectangle {
-            x: card.width - 44; y: card.width - 44; width: 36; height: 36; radius: 18
+            x: card.width - 44; y: card.width - 44; width: 36; height: 36; radius: Theme.r(18)
             visible: cardHover.containsMouse || playHover.containsMouse || card.playingNow
             color: playHover.containsMouse ? ink : acc
             Icon { visible: !card.playingNow || playHover.containsMouse; anchors.centerIn: parent; anchors.horizontalCenterOffset: 1; name: "play"; size: 16; color: playHover.containsMouse ? inkText : accText }
@@ -282,7 +284,7 @@ ApplicationWindow {
             leftPadding: 6; text: fmi.text; color: fmi.enabled ? ink : dim
             font.pixelSize: 13; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
         }
-        background: Rectangle { color: fmi.highlighted ? Theme.sel : "transparent"; radius: 7 }
+        background: Rectangle { color: fmi.highlighted ? Theme.sel : "transparent"; radius: Theme.r(7) }
     }
 
     // "+ MIX" on a track row
@@ -290,7 +292,7 @@ ApplicationWindow {
         id: mixMenu
         property var trackId: -1
         padding: 6
-        background: Rectangle { implicitWidth: 220; color: panel; border.color: line2; border.width: 1; radius: 10 }
+        background: Rectangle { implicitWidth: 220; color: panel; border.color: line2; border.width: Theme.bw; radius: Theme.r(10) }
         FlowMenuItem { text: "ADD TO MIX"; enabled: false }
         Instantiator {
             model: Library.mixes
@@ -321,7 +323,7 @@ ApplicationWindow {
         readonly property bool enriched: trackMenu.enrichedId > 0
         property int enrichedId: -1
         padding: 6
-        background: Rectangle { implicitWidth: 200; color: panel; border.color: line2; border.width: 1; radius: 10 }
+        background: Rectangle { implicitWidth: 200; color: panel; border.color: line2; border.width: Theme.bw; radius: Theme.r(10) }
         FlowMenuItem { text: "Play next"; onTriggered: Player.playNext(trackMenu.trackId) }
         FlowMenuItem { text: "Add to queue"; onTriggered: Player.enqueue(trackMenu.trackId) }
         FlowMenuItem {
@@ -397,7 +399,7 @@ ApplicationWindow {
     component NavField: TextField {
         width: parent.width; height: 38; leftPadding: 12; rightPadding: 12
         color: ink; font.pixelSize: 13; placeholderTextColor: dim; selectByMouse: true
-        background: Rectangle { radius: 9; color: Theme.hov; border.color: parent.activeFocus ? line2 : line; border.width: 1 }
+        background: Rectangle { radius: Theme.r(9); color: Theme.hov; border.color: parent.activeFocus ? line2 : line; border.width: Theme.bw }
     }
     Popup {
         id: navidromeDialog
@@ -405,7 +407,7 @@ ApplicationWindow {
         modal: true
         width: Math.min(root.width - 48, 420)
         padding: 20
-        background: Rectangle { radius: 12; color: panel; border.color: line2; border.width: 1 }
+        background: Rectangle { radius: Theme.r(12); color: panel; border.color: line2; border.width: Theme.bw }
         onOpened: {
             navUrl.text = Library.navidromeUrl;
             navUser.text = Library.navidromeUser;
@@ -443,28 +445,28 @@ ApplicationWindow {
         required property var preset
         readonly property bool selected: Theme.key === tc.preset.id
         height: 176
-        radius: 12
+        radius: Theme.r(12)
         color: tcHover.containsMouse ? Theme.hov : panel
         border.color: selected ? acc : tcHover.containsMouse ? line2 : line
-        border.width: selected ? 2 : 1
+        border.width: selected ? Theme.bw + 1 : Theme.bw
         MouseArea { id: tcHover; anchors.fill: parent; hoverEnabled: true; onClicked: Theme.select(tc.preset.id) }
         Column {
             anchors { fill: parent; margins: 10 }
             spacing: 8
             Rectangle {
-                width: parent.width; height: 90; radius: 8; clip: true
-                color: tc.preset.bg; border.color: tc.preset.line; border.width: 1
+                width: parent.width; height: 90; radius: Math.round(8 * tc.preset.radiusScale); clip: true
+                color: tc.preset.bg; border.color: tc.preset.line; border.width: tc.preset.borderWidth
                 Rectangle {
-                    x: 8; y: 8; width: parent.width - 16; height: parent.height - 16; radius: 6
-                    color: tc.preset.panel; border.color: tc.preset.line2; border.width: 1
-                    Rectangle { x: 8; y: 8; width: 14; height: 14; radius: 7; color: tc.preset.accent }
-                    Rectangle { x: 30; y: 9; width: 52; height: 5; radius: 2; color: tc.preset.ink }
-                    Rectangle { x: 30; y: 19; width: 34; height: 4; radius: 2; color: tc.preset.mut }
-                    Rectangle { x: 8; y: 36; width: parent.width - 16; height: 3; radius: 1; color: tc.preset.line2 }
-                    Rectangle { x: 8; y: 44; width: parent.width - 16; height: 3; radius: 1; color: tc.preset.line2 }
+                    x: 8; y: 8; width: parent.width - 16; height: parent.height - 16; radius: Math.round(6 * tc.preset.radiusScale)
+                    color: tc.preset.panel; border.color: tc.preset.line2; border.width: tc.preset.borderWidth
+                    Rectangle { x: 8; y: 8; width: 14; height: 14; radius: Math.round(7 * tc.preset.radiusScale); color: tc.preset.accent }
+                    Rectangle { x: 30; y: 9; width: 52; height: 5; radius: Math.round(2 * tc.preset.radiusScale); color: tc.preset.ink }
+                    Rectangle { x: 30; y: 19; width: 34; height: 4; radius: Math.round(2 * tc.preset.radiusScale); color: tc.preset.mut }
+                    Rectangle { x: 8; y: 36; width: parent.width - 16; height: 3; radius: Math.round(1 * tc.preset.radiusScale); color: tc.preset.line2 }
+                    Rectangle { x: 8; y: 44; width: parent.width - 16; height: 3; radius: Math.round(1 * tc.preset.radiusScale); color: tc.preset.line2 }
                     Rectangle {
-                        x: 8; y: 56; width: parent.width - 16; height: 4; radius: 2; color: tc.preset.line2
-                        Rectangle { width: parent.width * 0.6; height: 4; radius: 2; color: tc.preset.accent }
+                        x: 8; y: 56; width: parent.width - 16; height: 4; radius: Math.round(2 * tc.preset.radiusScale); color: tc.preset.line2
+                        Rectangle { width: parent.width * 0.6; height: 4; radius: Math.round(2 * tc.preset.radiusScale); color: tc.preset.accent }
                     }
                 }
             }
@@ -478,7 +480,7 @@ ApplicationWindow {
         modal: true
         width: Math.min(root.width - 48, 620)
         padding: 20
-        background: Rectangle { radius: 12; color: panel; border.color: line2; border.width: 1 }
+        background: Rectangle { radius: Theme.r(12); color: panel; border.color: line2; border.width: Theme.bw }
         contentItem: Column {
             width: themeDialog.width - 40
             spacing: 10
@@ -526,7 +528,7 @@ ApplicationWindow {
             width: narrow ? 34 : brandRow.implicitWidth
             IconButton {
                 visible: narrow
-                width: 34; height: 34; radius: 9
+                width: 34; height: 34; radius: Theme.r(9)
                 icon: "menu"; lit: railOpen; tip: "Library"
                 onClicked: railOpen = !railOpen
             }
@@ -557,8 +559,8 @@ ApplicationWindow {
             anchors.centerIn: parent
             // As wide as the space between the brand and the avatar allows.
             readonly property real room: parent.width - 2 * Math.max(brand.x + (narrow ? 34 : 120), 62) - 24
-            width: Math.max(160, Math.min(460, room)); height: 34; radius: 17
-            color: panel; border.color: searchField.activeFocus ? line2 : line; border.width: 1
+            width: Math.max(160, Math.min(460, room)); height: 34; radius: Theme.r(17)
+            color: panel; border.color: searchField.activeFocus ? line2 : line; border.width: Theme.bw
             Icon { x: 12; anchors.verticalCenter: parent.verticalCenter; name: "search"; size: 15; color: dim }
             TextField {
                 id: searchField
@@ -573,7 +575,7 @@ ApplicationWindow {
             Rectangle {
                 id: shortcutHint
                 anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 10 }
-                width: hintLabel.implicitWidth + 12; height: 18; radius: 6; color: "transparent"; border.color: line2; border.width: 1
+                width: hintLabel.implicitWidth + 12; height: 18; radius: Theme.r(6); color: "transparent"; border.color: line2; border.width: Theme.bw
                 visible: parent.width >= 300 && !searchField.activeFocus
                 Text { id: hintLabel; anchors.centerIn: parent; text: "Ctrl K"; color: dim; font.pixelSize: 9; font.family: mono }
             }
@@ -599,6 +601,7 @@ ApplicationWindow {
             cursorShape: Qt.PointingHandCursor
             onClicked: openDrawer("now")
         }
+        Bevel { anchors.fill: parent; raised: true }   // window chrome edge; invisible unless the theme has a bevel
     }
 
     // ================= body =================
@@ -649,7 +652,7 @@ ApplicationWindow {
                              on: page === "downloads", busy: Downloader.busy}
                         ]
                         Rectangle {
-                            width: parent.width; height: 34; radius: 9
+                            width: parent.width; height: 34; radius: Theme.r(9)
                             color: modelData.on ? Theme.sel : railHover.containsMouse ? Theme.hov : "transparent"
                             Icon { x: 10; anchors.verticalCenter: parent.verticalCenter; name: modelData.i; size: 16; color: modelData.on ? acc : mut }
                             Text { x: 36; anchors.verticalCenter: parent.verticalCenter; text: modelData.t; color: modelData.on ? ink : soft; font.pixelSize: 13 }
@@ -678,7 +681,7 @@ ApplicationWindow {
                             readonly property bool on: page === "tracks" && Library.viewKind === "mix" && Library.viewMixId === mixId
                             property bool renaming: false
                             property bool confirmDelete: false
-                            width: parent.width; height: 32; radius: 9
+                            width: parent.width; height: 32; radius: Theme.r(9)
                             color: on ? Theme.sel : mixHover.containsMouse ? Theme.hov : "transparent"
                             MouseArea {
                                 id: mixHover
@@ -687,7 +690,7 @@ ApplicationWindow {
                                 onDoubleClicked: mixRow.renaming = true
                                 onExited: mixRow.confirmDelete = false
                             }
-                            Rectangle { x: 14; anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: mixRow.on ? acc : Theme.idle; visible: !mixRow.renaming }
+                            Rectangle { x: 14; anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: Theme.r(4); color: mixRow.on ? acc : Theme.idle; visible: !mixRow.renaming }
                             Text {
                                 x: 36; anchors.verticalCenter: parent.verticalCenter; visible: !mixRow.renaming
                                 width: parent.width - 36 - 44; text: name; color: soft; font.pixelSize: 13; elide: Text.ElideRight
@@ -726,7 +729,7 @@ ApplicationWindow {
                                 anchors { fill: parent; leftMargin: 4; rightMargin: 4 }
                                 visible: mixRow.renaming
                                 text: name; color: ink; font.pixelSize: 13
-                                background: Rectangle { radius: 7; color: panel2; border.color: line2 }
+                                background: Rectangle { radius: Theme.r(7); color: panel2; border.color: line2 }
                                 onVisibleChanged: if (visible) { forceActiveFocus(); selectAll(); }
                                 onAccepted: { Library.renameMix(mixId, text); mixRow.renaming = false; }
                                 onActiveFocusChanged: if (!activeFocus) mixRow.renaming = false
@@ -735,7 +738,7 @@ ApplicationWindow {
                         }
                     }
                     Rectangle {
-                        width: parent.width; height: 32; radius: 9
+                        width: parent.width; height: 32; radius: Theme.r(9)
                         color: newMixHover.containsMouse ? Theme.hov : "transparent"
                         Icon { x: 10; anchors.verticalCenter: parent.verticalCenter; name: "plus"; size: 16; color: newMixHover.containsMouse ? ink : dim }
                         Text { x: 36; anchors.verticalCenter: parent.verticalCenter; text: "New mix"; color: newMixHover.containsMouse ? ink : dim; font.pixelSize: 13 }
@@ -755,7 +758,7 @@ ApplicationWindow {
                     }
                     Item { width: 1; height: 12 }
                     Rectangle {
-                        width: parent.width; height: 92; radius: 11; color: panel; border.color: cardHover.containsMouse ? line2 : line; border.width: 1
+                        width: parent.width; height: 92; radius: Theme.r(11); color: panel; border.color: cardHover.containsMouse ? line2 : line; border.width: Theme.bw
                         MouseArea { id: cardHover; anchors.fill: parent; hoverEnabled: true; onClicked: folderDialog.open() }
                         Column {
                             anchors { fill: parent; margins: 12 } spacing: 4
@@ -767,14 +770,14 @@ ApplicationWindow {
                             Text { width: parent.width; text: Library.musicDir; color: mut; font.pixelSize: 11; font.family: mono; elide: Text.ElideMiddle }
                             Text { width: parent.width; text: Library.storageText; color: mut; font.pixelSize: 11; elide: Text.ElideRight }
                             Rectangle {
-                                width: parent.width; height: 4; radius: 2; color: Theme.track
-                                Rectangle { width: parent.width * Library.storageUsed; height: 4; radius: 2; color: acc }
+                                width: parent.width; height: 4; radius: Theme.r(2); color: Theme.track
+                                Rectangle { width: parent.width * Library.storageUsed; height: 4; radius: Theme.r(2); color: acc }
                             }
                         }
                     }
                     Item { width: 1; height: 12 }
                     Rectangle {
-                        width: parent.width; height: 92; radius: 11; color: panel; border.color: navHover.containsMouse ? line2 : line; border.width: 1
+                        width: parent.width; height: 92; radius: Theme.r(11); color: panel; border.color: navHover.containsMouse ? line2 : line; border.width: Theme.bw
                         MouseArea { id: navHover; anchors.fill: parent; hoverEnabled: true; onClicked: navidromeDialog.open() }
                         Column {
                             anchors { fill: parent; margins: 12 } spacing: 4
@@ -789,7 +792,7 @@ ApplicationWindow {
                     }
                     Item { width: 1; height: 12 }
                     Rectangle {
-                        width: parent.width; height: 92; radius: 11; color: panel; border.color: themeHover.containsMouse ? line2 : line; border.width: 1
+                        width: parent.width; height: 92; radius: Theme.r(11); color: panel; border.color: themeHover.containsMouse ? line2 : line; border.width: Theme.bw
                         MouseArea { id: themeHover; anchors.fill: parent; hoverEnabled: true; onClicked: themeDialog.open() }
                         Column {
                             anchors { fill: parent; margins: 12 } spacing: 6
@@ -802,7 +805,7 @@ ApplicationWindow {
                                 spacing: 5
                                 Repeater {
                                     model: [Theme.bg, Theme.panel, Theme.ink, Theme.accent]
-                                    Rectangle { width: 18; height: 18; radius: 9; color: modelData; border.color: line2; border.width: 1 }
+                                    Rectangle { width: 18; height: 18; radius: Theme.r(9); color: modelData; border.color: line2; border.width: Theme.bw }
                                 }
                             }
                             Text { width: parent.width; text: Theme.name; color: mut; font.pixelSize: 11; font.family: mono; elide: Text.ElideRight }
@@ -810,6 +813,7 @@ ApplicationWindow {
                     }
                 }
             }
+            Bevel { anchors.fill: parent; raised: false }   // the library rail reads as a sunken well
         }
 
         // ---- center ----
@@ -878,9 +882,9 @@ ApplicationWindow {
                             id: chip
                             anchors.verticalCenter: parent.verticalCenter
                             readonly property bool on: Library.format === modelData
-                            height: 30; width: chipContent.implicitWidth + 26; radius: 15
+                            height: 30; width: chipContent.implicitWidth + 26; radius: Theme.r(15)
                             color: on ? ink : chipHover.containsMouse ? Theme.hov : panel
-                            border.color: on ? ink : line2; border.width: 1
+                            border.color: on ? ink : line2; border.width: Theme.bw
                             Row {
                                 id: chipContent
                                 anchors.centerIn: parent; spacing: 5
@@ -893,8 +897,8 @@ ApplicationWindow {
                     Item { width: 4; height: 1 }
                     Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
-                        height: 30; width: sortLabel.implicitWidth + 26; radius: 9
-                        color: sortHover.containsMouse ? Theme.hov : panel; border.color: line2; border.width: 1
+                        height: 30; width: sortLabel.implicitWidth + 26; radius: Theme.r(9)
+                        color: sortHover.containsMouse ? Theme.hov : panel; border.color: line2; border.width: Theme.bw
                         Text { id: sortLabel; anchors.centerIn: parent; color: ink; font.pixelSize: 11; font.family: mono
                             text: Library.sortMode === "title" ? "Title A–Z" : Library.sortMode === "artist" ? "Artist A–Z"
                                 : Library.sortMode === "dur" ? "Longest first"
@@ -906,8 +910,8 @@ ApplicationWindow {
                     }
                     Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
-                        height: 30; width: densityLabel.implicitWidth + 26; radius: 9
-                        color: densityHover.containsMouse ? Theme.hov : panel; border.color: line2; border.width: 1
+                        height: 30; width: densityLabel.implicitWidth + 26; radius: Theme.r(9)
+                        color: densityHover.containsMouse ? Theme.hov : panel; border.color: line2; border.width: Theme.bw
                         Text { id: densityLabel; anchors.centerIn: parent; color: ink; font.pixelSize: 11; font.family: mono; text: root.denseRows ? "Dense" : "Comfy" }
                         MouseArea { id: densityHover; anchors.fill: parent; hoverEnabled: true; onClicked: root.denseRows = !root.denseRows }
                     }
@@ -925,7 +929,7 @@ ApplicationWindow {
                     }
                     Pill {
                         anchors.verticalCenter: parent.verticalCenter
-                        visible: Library.shownCount > 0; implicitHeight: 30; radius: 15
+                        visible: Library.shownCount > 0; implicitHeight: 30; radius: Theme.r(15)
                         solid: true; text: "PLAY"; icon: "play"
                         onClicked: Player.playTracks(Library.visibleTrackIds(), 0)
                     }
@@ -973,8 +977,8 @@ ApplicationWindow {
 
                 Rectangle {
                     id: linkBox
-                    width: parent.width; height: 52; radius: 12
-                    color: panel; border.color: linkField.activeFocus ? line2 : line; border.width: 1
+                    width: parent.width; height: 52; radius: Theme.r(12)
+                    color: panel; border.color: linkField.activeFocus ? line2 : line; border.width: Theme.bw
                     enabled: Downloader.available; opacity: enabled ? 1 : 0.5
                     Icon { x: 15; anchors.verticalCenter: parent.verticalCenter; name: "link"; size: 16; color: linkField.activeFocus ? soft : dim }
                     TextField {
@@ -998,11 +1002,11 @@ ApplicationWindow {
                                 id: modeChip
                                 readonly property bool on: downloadsPage.asList === modelData.list
                                 anchors.verticalCenter: parent.verticalCenter
-                                height: 26; width: modeLabel.implicitWidth + 18; radius: 13
+                                height: 26; width: modeLabel.implicitWidth + 18; radius: Theme.r(13)
                                 enabled: modelData.list || !downloadsPage.onlyList
                                 opacity: enabled ? 1 : 0.4
                                 color: on ? ink : modeHover.containsMouse ? Theme.sel : "transparent"
-                                border.color: on ? ink : line2; border.width: 1
+                                border.color: on ? ink : line2; border.width: Theme.bw
                                 Text { id: modeLabel; anchors.centerIn: parent; text: modelData.t; color: modeChip.on ? inkText : soft; font.pixelSize: 10; font.family: mono; font.bold: modeChip.on }
                                 MouseArea { id: modeHover; anchors.fill: parent; hoverEnabled: true; onClicked: downloadsPage.wantList = modelData.list }
                             }
@@ -1011,7 +1015,7 @@ ApplicationWindow {
                     Pill {
                         id: goPill
                         anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
-                        implicitHeight: 32; radius: 16
+                        implicitHeight: 32; radius: Theme.r(16)
                         solid: true; icon: "download"; text: linkBox.width >= 440 ? "DOWNLOAD" : ""
                         opacity: downloadsPage.ready ? 1 : 0.45
                         onClicked: downloadsPage.submit()
@@ -1073,8 +1077,8 @@ ApplicationWindow {
                         property bool expanded: false
                         width: jobList.width
                         height: 60 + (expanded && expandable ? trackBlock.height + 8 : 0)
-                        radius: 11
-                        color: panel; border.color: status === "running" ? litLine : line; border.width: 1
+                        radius: Theme.r(11)
+                        color: panel; border.color: status === "running" ? litLine : line; border.width: Theme.bw
                         clip: true
                         Column {
                             anchors { left: parent.left; right: parent.right; top: parent.top }
@@ -1083,7 +1087,7 @@ ApplicationWindow {
                                 width: parent.width; height: 60
                                 Rectangle {
                                     x: 12; anchors.verticalCenter: parent.verticalCenter
-                                    width: 36; height: 36; radius: 9
+                                    width: 36; height: 36; radius: Theme.r(9)
                                     color: status === "running" ? litBg : Theme.chip
                                     Icon {
                                         anchors.centerIn: parent; size: 16
@@ -1166,8 +1170,8 @@ ApplicationWindow {
                                         }
                                         Rectangle {
                                             anchors { left: parent.left; leftMargin: 60; right: parent.right; rightMargin: 12; bottom: parent.bottom }
-                                            height: 2; radius: 1; color: Theme.faint; visible: modelData.state === "downloading"
-                                            Rectangle { width: parent.width * modelData.progress; height: 2; radius: 1; color: acc }
+                                            height: 2; radius: Theme.r(1); color: Theme.faint; visible: modelData.state === "downloading"
+                                            Rectangle { width: parent.width * modelData.progress; height: 2; radius: Theme.r(1); color: acc }
                                         }
                                         Rectangle {
                                             anchors { left: parent.left; leftMargin: 60; right: parent.right; bottom: parent.bottom }
@@ -1257,12 +1261,12 @@ ApplicationWindow {
 
                 delegate: Rectangle {
                     id: trackRow
-                    width: trackList.width; height: trackList.rowH; radius: 9
+                    width: trackList.width; height: trackList.rowH; radius: Theme.r(9)
                     readonly property bool isCur: ti === Player.currentId
                     readonly property bool hovered: rowHover.containsMouse || actionsHover.hovered || handleArea.containsMouse || likeArea.containsMouse
                     color: isCur ? litBg : hovered ? Theme.hovSoft : "transparent"
                     border.color: trackList.dropAt === index && trackList.dragFrom !== index ? acc : "transparent"
-                    border.width: 1
+                    border.width: Theme.bw
                     opacity: trackList.dragFrom === index ? 0.5 : 1
 
                     MouseArea {
@@ -1339,7 +1343,7 @@ ApplicationWindow {
                         id: actions
                         visible: trackRow.hovered && trackList.dragFrom < 0
                         anchors { right: parent.right; rightMargin: trackList.pad + trackList.heartW + trackList.timeW + 12; verticalCenter: parent.verticalCenter }
-                        width: actionRow.implicitWidth + 16; height: Math.min(40, trackList.rowH - 4); radius: 8
+                        width: actionRow.implicitWidth + 16; height: Math.min(40, trackList.rowH - 4); radius: Theme.r(8)
                         color: trackRow.color === "transparent" ? Theme.hovSoft : trackRow.color
                         HoverHandler { id: actionsHover }
                         Row {
@@ -1401,7 +1405,7 @@ ApplicationWindow {
                     Pill {
                         visible: !parent.emptyMix && Library.totalCount === 0 && !Library.scanning
                         anchors.horizontalCenter: parent.horizontalCenter
-                        implicitHeight: 34; radius: 17; solid: true
+                        implicitHeight: 34; radius: Theme.r(17); solid: true
                         text: "CHOOSE MUSIC FOLDER"; icon: "folder"
                         onClicked: folderDialog.open()
                     }
@@ -1424,7 +1428,7 @@ ApplicationWindow {
                 readonly property int slot: drawerTab === "queue" ? 1 : drawerTab === "lyrics" ? 2 : 0
                 x: tabs.x + slot * (width + 4); y: tabs.y
                 width: (tabs.width - 8) / 3; height: 34
-                radius: 9; color: panel2; border.color: line; border.width: 1
+                radius: Theme.r(9); color: panel2; border.color: line; border.width: Theme.bw
                 Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
             }
             Row {
@@ -1435,8 +1439,8 @@ ApplicationWindow {
                     model: [{t: "NOW", k: "now"}, {t: "QUEUE", k: "queue"}, {t: "LYRICS", k: "lyrics"}]
                     Rectangle {
                         width: (tabs.width - 8) / 3; height: 34
-                        radius: 9; color: tabHover.containsMouse && drawerTab !== modelData.k ? Theme.hovSoft : "transparent"
-                        border.color: "transparent"; border.width: 1
+                        radius: Theme.r(9); color: tabHover.containsMouse && drawerTab !== modelData.k ? Theme.hovSoft : "transparent"
+                        border.color: "transparent"; border.width: Theme.bw
                         Text { anchors.centerIn: parent; color: drawerTab === modelData.k ? ink : dim; font.pixelSize: 10; font.family: mono
                             text: modelData.k === "queue" && Player.queueCount > 0 ? modelData.t + " · " + Player.queueCount : modelData.t }
                         MouseArea { id: tabHover; anchors.fill: parent; hoverEnabled: true; onClicked: drawerTab = modelData.k }
@@ -1459,7 +1463,7 @@ ApplicationWindow {
                     id: nowCol
                     width: parent.width; spacing: 12
                     Art {
-                        width: parent.width; height: parent.width; radius: 12
+                        width: parent.width; height: parent.width; radius: Theme.r(12)
                         source: cur.cover; c1: cur.c1; c2: cur.c2
                         decodeSize: 640
                     }
@@ -1471,9 +1475,9 @@ ApplicationWindow {
                         Repeater {
                             model: [cur.f + (cur.hi ? " HI-RES" : ""), cur.khz, cur.br].filter(s => s !== "")
                             Rectangle {
-                                height: 24; width: specLabel.implicitWidth + 16; radius: 7
+                                height: 24; width: specLabel.implicitWidth + 16; radius: Theme.r(7)
                                 color: index === 0 && cur.hi ? acc : panel
-                                border.color: index === 0 && cur.hi ? acc : line2; border.width: 1
+                                border.color: index === 0 && cur.hi ? acc : line2; border.width: Theme.bw
                                 Text { id: specLabel; anchors.centerIn: parent; text: modelData; font.pixelSize: 10; font.family: mono
                                     color: index === 0 && cur.hi ? accText : soft; font.bold: index === 0 && cur.hi }
                             }
@@ -1487,17 +1491,17 @@ ApplicationWindow {
                             model: [cur.g, cur.yr > 0 ? String(cur.yr) : "",
                                     Player.loudnessText].filter(s => s !== "")
                             Rectangle {
-                                height: 24; width: metaChip.implicitWidth + 16; radius: 7
-                                color: panel; border.color: line2; border.width: 1
+                                height: 24; width: metaChip.implicitWidth + 16; radius: Theme.r(7)
+                                color: panel; border.color: line2; border.width: Theme.bw
                                 Text { id: metaChip; anchors.centerIn: parent; text: modelData
                                     font.pixelSize: 10; font.family: mono; color: soft }
                             }
                         }
                         // The lookup, right where the gaps it fills are visible.
                         Rectangle {
-                            height: 24; width: enrichChip.implicitWidth + 16; radius: 7
+                            height: 24; width: enrichChip.implicitWidth + 16; radius: Theme.r(7)
                             visible: Player.hasTrack && cur.en !== true
-                            color: panel; border.color: line2; border.width: 1
+                            color: panel; border.color: line2; border.width: Theme.bw
                             Text { id: enrichChip; anchors.centerIn: parent
                                 text: Enricher.busy ? "ENRICHING " + Enricher.pending + "…" : "＋ ENRICH METADATA"
                                 font.pixelSize: 10; font.family: mono; color: acc }
@@ -1523,7 +1527,7 @@ ApplicationWindow {
                     Item {
                         id: waveArea
                         width: parent.width; height: 76
-                        Rectangle { anchors.fill: parent; radius: 10; color: Theme.sunk; border.color: line; border.width: 1 }
+                        Rectangle { anchors.fill: parent; radius: Theme.r(10); color: Theme.sunk; border.color: line; border.width: Theme.bw }
                         Row {
                             anchors { fill: parent; margins: 8 }
                             spacing: 2
@@ -1561,7 +1565,7 @@ ApplicationWindow {
                         height: Player.hasTrack ? 100 : 0
                         visible: height > 0
                         clip: true
-                        Rectangle { anchors.fill: parent; radius: 10; color: Theme.sunk; border.color: line; border.width: 1 }
+                        Rectangle { anchors.fill: parent; radius: Theme.r(10); color: Theme.sunk; border.color: line; border.width: Theme.bw }
                         Item {
                             id: bands
                             anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 8; topMargin: 8 }
@@ -1611,10 +1615,10 @@ ApplicationWindow {
                             id: upRow
                             readonly property int row: Player.queueIndex + 1 + index
                             readonly property var k: { Player.queueCount; Player.queueIndex; return Player.queueAt(row); }
-                            width: parent.width; height: 48; radius: 9
-                            color: upHover.containsMouse ? Theme.hovSoft : "transparent"; border.color: line; border.width: 1
+                            width: parent.width; height: 48; radius: Theme.r(9)
+                            color: upHover.containsMouse ? Theme.hovSoft : "transparent"; border.color: line; border.width: Theme.bw
                             Art {
-                                x: 8; anchors.verticalCenter: parent.verticalCenter; width: 32; height: 32; radius: 6
+                                x: 8; anchors.verticalCenter: parent.verticalCenter; width: 32; height: 32; radius: Theme.r(6)
                                 source: upRow.k.cover; c1: upRow.k.c1; c2: upRow.k.c2; accent: false; decodeSize: 64
                             }
                             Column {
@@ -1645,9 +1649,9 @@ ApplicationWindow {
                     Text { text: div; color: mut; font.pixelSize: 11; font.bold: true; visible: div !== ""; bottomPadding: 5; width: parent.width; elide: Text.ElideRight }
                     Rectangle {
                         id: qRow
-                        width: parent.width; height: 46; radius: 9
+                        width: parent.width; height: 46; radius: Theme.r(9)
                         color: qDelegate.isCur ? litBg : qHover.containsMouse ? Theme.hovSoft : panel2
-                        border.color: queueList.dropAt === index && queueList.dragFrom !== index ? acc : line; border.width: 1
+                        border.color: queueList.dropAt === index && queueList.dragFrom !== index ? acc : line; border.width: Theme.bw
                         opacity: queueList.dragFrom === index ? 0.5 : 1
                         readonly property bool hovered: qHover.containsMouse || removeArea.containsMouse || dragArea.containsMouse
                         MouseArea { id: qHover; anchors.fill: parent; hoverEnabled: true; onClicked: Player.jump(index) }
@@ -1744,8 +1748,8 @@ ApplicationWindow {
     Rectangle {
         id: toastBox
         anchors { horizontalCenter: parent.horizontalCenter; bottom: dock.top; bottomMargin: 14 }
-        z: 20; radius: 10; height: 36; width: Math.min(root.width - 32, toast.implicitWidth + 32)
-        color: panel; border.color: line2; border.width: 1
+        z: 20; radius: Theme.r(10); height: 36; width: Math.min(root.width - 32, toast.implicitWidth + 32)
+        color: panel; border.color: line2; border.width: Theme.bw
         opacity: toastShown ? 1 : 0; visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 200 } }
         Text { id: toast; anchors.centerIn: parent; width: parent.width - 32
@@ -1772,12 +1776,12 @@ ApplicationWindow {
                     width: Math.max(1, seek.width / 96 - 1.5)
                     height: Math.max(2, level * seek.height)
                     anchors.verticalCenter: parent.verticalCenter
-                    radius: 1
+                    radius: Theme.r(1)
                     color: (index + 0.5) / 96 <= progress ? acc : seekArea.containsMouse ? Theme.idle : Theme.track
                 }
             }
-            Rectangle { visible: Player.peaks.length !== 96; anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: seekArea.containsMouse ? 6 : 4; radius: 3; color: Theme.faint }
-            Rectangle { visible: Player.peaks.length !== 96; anchors.verticalCenter: parent.verticalCenter; width: parent.width * progress; height: seekArea.containsMouse ? 6 : 4; radius: 3; color: acc }
+            Rectangle { visible: Player.peaks.length !== 96; anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: seekArea.containsMouse ? 6 : 4; radius: Theme.r(3); color: Theme.faint }
+            Rectangle { visible: Player.peaks.length !== 96; anchors.verticalCenter: parent.verticalCenter; width: parent.width * progress; height: seekArea.containsMouse ? 6 : 4; radius: Theme.r(3); color: acc }
             MouseArea { id: seekArea; anchors.fill: parent; hoverEnabled: true; onClicked: mouse => Player.seek(Player.duration * (mouse.x / width)) }
         }
         // left: now playing (click opens the drawer's NOW tab)
@@ -1791,7 +1795,7 @@ ApplicationWindow {
             Art {
                 id: dockArt
                 anchors.verticalCenter: parent.verticalCenter
-                width: 42; height: 42; radius: 8
+                width: 42; height: 42; radius: Theme.r(8)
                 source: cur.cover; c1: cur.c1; c2: cur.c2; accent: false; decodeSize: 96
             }
             Column {
@@ -1827,7 +1831,7 @@ ApplicationWindow {
             IconButton { anchors.verticalCenter: parent.verticalCenter; icon: "prev"; iconSize: 16; tip: "Previous"; onClicked: Player.previous() }
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
-                width: 44; height: 44; radius: 22
+                width: 44; height: 44; radius: Theme.r(22)
                 color: playHoverDock.containsMouse ? acc : ink
                 Icon { anchors.centerIn: parent; anchors.horizontalCenterOffset: Player.playing ? 0 : 1; name: Player.playing ? "pause" : "play"; size: 18; color: playHoverDock.containsMouse ? accText : inkText }
                 MouseArea { id: playHoverDock; anchors.fill: parent; hoverEnabled: true; onClicked: Player.toggle() }
@@ -1856,8 +1860,82 @@ ApplicationWindow {
             x: (volBtn.width - width) / 2
             y: -height - 10
             width: 144; height: 40; padding: 12
-            background: Rectangle { color: panel; border.color: line2; border.width: 1; radius: 10 }
+            background: Rectangle { color: panel; border.color: line2; border.width: Theme.bw; radius: Theme.r(10) }
             VolumeBar { width: 120; height: 16 }
+        }
+        Popup {
+            id: devicePopup
+            parent: deviceBtn
+            x: Math.min(0, deviceBtn.width - width)
+            y: -height - 10
+            width: 270
+            padding: 8
+            contentHeight: Math.min(devCol.implicitHeight, 320)
+            background: Rectangle {
+                color: panel
+                border.color: line2
+                border.width: Theme.bw
+                radius: Theme.r(10)
+            }
+            Flickable {
+                anchors.fill: parent
+                contentHeight: devCol.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                Column {
+                    id: devCol
+                    width: parent.width
+                    spacing: 4
+                    Text {
+                        text: "AUDIO OUTPUT"
+                        font.pixelSize: 9
+                        font.family: mono
+                        font.bold: true
+                        color: dim
+                        leftPadding: 8
+                        topPadding: 2
+                        bottomPadding: 4
+                    }
+                    Repeater {
+                        model: Player.audioDevices
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: parent.width
+                            height: 32
+                            radius: Theme.r(6)
+                            color: modelData.active ? Theme.sel : devHover.containsMouse ? line : "transparent"
+                            MouseArea {
+                                id: devHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    Player.setAudioDevice(modelData.id)
+                                    devicePopup.close()
+                                }
+                            }
+                            Row {
+                                anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
+                                spacing: 8
+                                Rectangle {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 6; height: 6; radius: Theme.r(3)
+                                    color: modelData.active ? acc : "transparent"
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width - 20
+                                    text: modelData.name
+                                    color: modelData.active ? ink : soft
+                                    font.bold: modelData.active
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         // right: time + volume
         Row {
@@ -1871,13 +1949,22 @@ ApplicationWindow {
             }
             Icon { anchors.verticalCenter: parent.verticalCenter; visible: dock.wideVol; name: "volume"; size: 16; color: mut }
             VolumeBar { id: vol; visible: dock.wideVol; anchors.verticalCenter: parent.verticalCenter }
+            IconButton {
+                id: deviceBtn
+                anchors.verticalCenter: parent.verticalCenter
+                icon: /headphone|bud|airpod|ear/i.test(Player.currentAudioDevice) ? "headphones" : "speaker"
+                iconSize: 16
+                lit: devicePopup.opened || Player.audioDevice !== ""
+                tip: "Audio: " + Player.currentAudioDevice
+                onClicked: { volPopup.close(); devicePopup.opened ? devicePopup.close() : devicePopup.open() }
+            }
             // narrow docks: the slider moves into a popup behind this button
             IconButton {
                 id: volBtn
                 visible: !dock.wideVol
                 anchors.verticalCenter: parent.verticalCenter
                 icon: "volume"; iconSize: 16; tip: "Volume"
-                onClicked: volPopup.opened ? volPopup.close() : volPopup.open()
+                onClicked: { devicePopup.close(); volPopup.opened ? volPopup.close() : volPopup.open() }
             }
             // Loudness matching: a player can only turn a track down, so this
             // evens out the library by pulling the loud ones back to the level
@@ -1886,9 +1973,9 @@ ApplicationWindow {
                 id: matchPill
                 anchors.verticalCenter: parent.verticalCenter
                 visible: Player.hasTrack && Player.loudnessText !== "" && !narrow
-                height: 22; width: matchLabel.implicitWidth + 16; radius: 7
+                height: 22; width: matchLabel.implicitWidth + 16; radius: Theme.r(7)
                 color: Player.matchLoudness ? acc : panel
-                border.color: Player.matchLoudness ? acc : line2; border.width: 1
+                border.color: Player.matchLoudness ? acc : line2; border.width: Theme.bw
                 Text {
                     id: matchLabel; anchors.centerIn: parent
                     text: Player.matchLoudness && Player.matchGain < 0.99
@@ -1909,6 +1996,37 @@ ApplicationWindow {
                     delay: 400
                 }
                 }
+            // Full sound: EQ, compression and width on the decoded PCM. The
+            // player's own output is muted while it runs; a backend without a
+            // PCM tap falls back to plain output.
+            Rectangle {
+                id: fullPill
+                anchors.verticalCenter: parent.verticalCenter
+                visible: Player.hasTrack && !narrow
+                height: 22; width: fullLabel.implicitWidth + 16; radius: Theme.r(7)
+                color: Player.fullness && Player.fullnessActive ? acc : panel
+                border.color: Player.fullness && Player.fullnessActive ? acc : line2; border.width: Theme.bw
+                Text {
+                    id: fullLabel; anchors.centerIn: parent
+                    text: "FULL"
+                    font.pixelSize: 10; font.family: mono
+                    color: Player.fullness && Player.fullnessActive ? accText : soft
+                    font.bold: Player.fullness
+                }
+                HoverHandler { id: fullHover }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: Player.fullness = !Player.fullness
+                }
+                ToolTip {
+                    visible: fullHover.hovered
+                    text: Player.fullnessActive
+                        ? "Fuller sound: weight, presence, compression and width — click for plain output"
+                        : "Full sound needs the ffmpeg backend's audio tap; this session plays plain output"
+                    delay: 400
+                }
+            }
             }
         }
+        Bevel { anchors.fill: parent; raised: true }   // taskbar-style edge; invisible unless the theme has a bevel
     }

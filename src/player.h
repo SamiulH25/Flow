@@ -1,11 +1,14 @@
 #pragma once
 
 #include "lyrics.h"
+#include "mixer.h"
 #include "playqueue.h"
 #include "waveform.h"
 #include "visualizer.h"
 
+#include <QAudioBufferOutput>
 #include <QAudioOutput>
+#include <QMediaDevices>
 #include <QMediaPlayer>
 #include <QObject>
 #include <QTimer>
@@ -17,8 +20,9 @@ class Library;
 class QJSEngine;
 class QQmlEngine;
 
-// Playback engine: QMediaPlayer (ffmpeg backend) driven by a PlayQueue.
-// Times are exposed to QML in seconds.
+// Playback engine: QMediaPlayer (ffmpeg backend) driven by a PlayQueue, with
+// the decoded PCM tapped through Mixer for the "full sound" mode. Times are
+// exposed to QML in seconds.
 class Player : public QObject
 {
     Q_OBJECT
@@ -48,7 +52,12 @@ class Player : public QObject
     Q_PROPERTY(bool visualizerActive READ visualizerActive NOTIFY visualizerChanged)
     Q_PROPERTY(bool matchLoudness READ matchLoudness WRITE setMatchLoudness NOTIFY matchChanged)
     Q_PROPERTY(qreal matchGain READ matchGain NOTIFY matchChanged)   // <= 1: we can only turn down
+    Q_PROPERTY(bool fullness READ fullness WRITE setFullness NOTIFY fullnessChanged)
+    Q_PROPERTY(bool fullnessActive READ fullnessActive NOTIFY fullnessChanged)
     Q_PROPERTY(QString loudnessText READ loudnessText NOTIFY matchChanged)
+    Q_PROPERTY(QVariantList audioDevices READ audioDevices NOTIFY audioDevicesChanged)
+    Q_PROPERTY(QString audioDevice READ audioDevice WRITE setAudioDevice NOTIFY audioDeviceChanged)
+    Q_PROPERTY(QString currentAudioDevice READ currentAudioDevice NOTIFY audioDeviceChanged)
 
 public:
     explicit Player(Library *library, QObject *parent = nullptr);
@@ -94,7 +103,17 @@ public:
     bool matchLoudness() const { return m_matchLoudness; }
     void setMatchLoudness(bool on);
     qreal matchGain() const { return m_matchGain; }
+    bool fullness() const { return m_fullness; }
+    void setFullness(bool on);
+    // True while the tap actually feeds the mixer (a backend without
+    // QAudioBufferOutput support falls back to plain output).
+    bool fullnessActive() const { return m_fullness && !m_dspFailed; }
     QString loudnessText() const;
+    QVariantList audioDevices() const;
+    QString audioDevice() const { return m_audioDeviceId; }
+    void setAudioDevice(const QString &id);
+    QString currentAudioDevice() const;
+    Q_INVOKABLE void selectAudioDevice(const QString &id) { setAudioDevice(id); }
 
     // Replace the queue with `ids` (library track ids) and start at `start`.
     Q_INVOKABLE void playTracks(const QVariantList &ids, int start);
@@ -129,6 +148,9 @@ signals:
     void peaksChanged();   // explicit jumps only, not normal progress
     void visualizerChanged();
     void matchChanged();
+    void fullnessChanged();
+    void audioDeviceChanged();
+    void audioDevicesChanged();
 
 private:
     void loadCurrent(bool autoplay);
@@ -145,13 +167,21 @@ private:
     void loadPeaks();
     void setPeaks(const QByteArray &bars);
     void applyMatch();
+    void updateAudioDevice(bool force = false);
+    void onAudioOutputsChanged();
+    void onPlaybackStateChanged();
+    void onMixerFailed();
+    void armDspWatchdog();
 
     static inline Player *s_instance = nullptr;
 
     Library *m_library;
     PlayQueue m_queue;
     QAudioOutput m_audio;        // declared first: must outlive m_player
-    Visualizer m_visualizer;   // declared first: the tap must outlive m_player
+    QMediaDevices m_mediaDevices;
+    QAudioBufferOutput m_tap{Mixer::format()};   // before m_player: must outlive it
+    Visualizer m_visualizer;
+    Mixer m_mixer;
     QMediaPlayer m_player;
     QString m_loadedPath;
     quint64 m_loadedUid = 0;     // queue entry currently in m_player
@@ -169,4 +199,8 @@ private:
     QString m_error;
     bool m_matchLoudness = false;
     float m_matchGain = 1.0f;
+    QString m_audioDeviceId;
+    bool m_fullness = true;
+    bool m_dspFailed = false;   // no tap / no sink: plain output for this session
+    QTimer m_dspWatchdog;
 };

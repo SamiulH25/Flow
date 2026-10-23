@@ -19,6 +19,8 @@
 #include "track.h"
 #include "ytdlp.h"
 
+#include <QAudioDevice>
+#include <QMediaDevices>
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QDir>
@@ -692,7 +694,18 @@ int cmdDoctor(const Options &options, Reporter &report)
     const QString ytDlpVersion = toolVersion(program, QStringLiteral("--version"));
     const QString ffmpegVersion = toolVersion(ffmpeg, QStringLiteral("-version"));
 
+    const QList<QAudioDevice> audioOutputs = QMediaDevices::audioOutputs();
+    const QAudioDevice defaultAudio = QMediaDevices::defaultAudioOutput();
+
     if (options.json) {
+        QVariantList audioList;
+        for (const auto &d : audioOutputs) {
+            audioList.append(QVariantMap{
+                {QStringLiteral("id"), QString::fromUtf8(d.id())},
+                {QStringLiteral("name"), d.description()},
+                {QStringLiteral("default"), d.isDefault() || d == defaultAudio}
+            });
+        }
         printJson({{QStringLiteral("music"), s.musicDir},
                    {QStringLiteral("db"), s.dbPath},
                    {QStringLiteral("covers"), s.coverDir},
@@ -702,7 +715,9 @@ int cmdDoctor(const Options &options, Reporter &report)
                    {QStringLiteral("ytdlp"), program},
                    {QStringLiteral("ytdlpVersion"), ytDlpVersion},
                    {QStringLiteral("ffmpeg"), ffmpeg},
-                   {QStringLiteral("ffmpegVersion"), ffmpegVersion}});
+                   {QStringLiteral("ffmpegVersion"), ffmpegVersion},
+                   {QStringLiteral("audioDevices"), audioList},
+                   {QStringLiteral("audioDefault"), defaultAudio.description()}});
     } else {
         const auto describe = [](const QString &tool, const QString &version) {
             if (tool.isEmpty())
@@ -715,11 +730,53 @@ int cmdDoctor(const Options &options, Reporter &report)
                 .arg(library->totalCount())
                 .arg(library->likedCount()));
         say(QStringLiteral("covers    %1").arg(s.coverDir));
+        say(QStringLiteral("audio     %1  (%2 available)")
+                .arg(defaultAudio.description().isEmpty() ? QStringLiteral("none") : defaultAudio.description())
+                .arg(audioOutputs.size()));
         say(QStringLiteral("yt-dlp    %1").arg(describe(program, ytDlpVersion)));
         say(QStringLiteral("ffmpeg    %1").arg(describe(ffmpeg, ffmpegVersion)));
     }
     Q_UNUSED(report);
     return program.isEmpty() || ffmpeg.isEmpty() ? 1 : 0;
+}
+
+// ---------------------------------------------------------------- devices
+
+int cmdDevices(const Options &options, Reporter &report)
+{
+    const QList<QAudioDevice> outputs = QMediaDevices::audioOutputs();
+    const QAudioDevice def = QMediaDevices::defaultAudioOutput();
+
+    if (options.json) {
+        QVariantList list;
+        for (const QAudioDevice &d : outputs) {
+            list.append(QVariantMap{
+                {QStringLiteral("id"), QString::fromUtf8(d.id())},
+                {QStringLiteral("name"), d.description()},
+                {QStringLiteral("default"), d.isDefault() || d == def}
+            });
+        }
+        printJson({{QStringLiteral("count"), int(outputs.size())},
+                   {QStringLiteral("default"), def.description()},
+                   {QStringLiteral("devices"), list}});
+    } else {
+        if (outputs.isEmpty()) {
+            say(QStringLiteral("no audio output devices found"));
+        } else {
+            for (const QAudioDevice &d : outputs) {
+                const bool isDef = (d.isDefault() || d == def);
+                const QString marker = isDef ? QStringLiteral("* ") : QStringLiteral("  ");
+                const QString defTag = isDef ? QStringLiteral(" (default)") : QString();
+                say(QStringLiteral("%1%2 %3%4")
+                        .arg(marker)
+                        .arg(QString::fromUtf8(d.id()), -44)
+                        .arg(d.description())
+                        .arg(defTag));
+            }
+        }
+    }
+    Q_UNUSED(report);
+    return 0;
 }
 
 } // namespace
@@ -826,7 +883,9 @@ int main(int argc, char *argv[])
         return cmdMixes(options, report);
     if (command == QLatin1String("doctor"))
         return cmdDoctor(options, report);
-    note(QStringLiteral("unknown command “%1” (download, scan, list, mixes, doctor)")
+    if (command == QLatin1String("devices"))
+        return cmdDevices(options, report);
+    note(QStringLiteral("unknown command “%1” (download, scan, list, mixes, doctor, devices)")
              .arg(command));
     return 2;
 }

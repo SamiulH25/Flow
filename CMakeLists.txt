@@ -30,6 +30,28 @@ if(FLOW_MPRIS)
 endif()
 find_package(taglib 2 REQUIRED CONFIG)
 
+# Backdrop blur (src/windowfx.cpp). Wayland needs the WaylandClient module, the
+# protocol generator and ext-background-effect from wayland-protocols. Without
+# them WindowFx builds as the no-op backend.
+set(FLOW_WAYLAND_BLUR OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Qt6 COMPONENTS WaylandClient GuiPrivate QUIET)
+    find_package(WaylandScanner QUIET)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(FLOW_WAYLAND_CLIENT QUIET IMPORTED_TARGET wayland-client)
+        pkg_check_modules(FLOW_WAYLAND_PROTOCOLS QUIET wayland-protocols)
+    endif()
+    if(Qt6WaylandClient_FOUND AND Qt6GuiPrivate_FOUND AND WaylandScanner_FOUND AND FLOW_WAYLAND_CLIENT_FOUND AND FLOW_WAYLAND_PROTOCOLS_FOUND)
+        pkg_get_variable(FLOW_WAYLAND_PROTOCOLS_DIR wayland-protocols pkgdatadir)
+        set(FLOW_BACKGROUND_EFFECT_XML
+            "${FLOW_WAYLAND_PROTOCOLS_DIR}/staging/ext-background-effect/ext-background-effect-v1.xml")
+        if(EXISTS "${FLOW_BACKGROUND_EFFECT_XML}")
+            set(FLOW_WAYLAND_BLUR ON)
+        endif()
+    endif()
+endif()
+
 include(GNUInstallDirs)
 qt_standard_project_setup(REQUIRES 6.8)
 
@@ -64,14 +86,18 @@ qt_add_qml_module(flow
     QML_FILES
         qml/Main.qml
         qml/Icon.qml
+        qml/Bevel.qml
         qml/Theme.qml
     SOURCES
         src/library.h src/library.cpp
         src/player.h src/player.cpp
+        src/mastering.h src/mastering.cpp
+        src/mixer.h src/mixer.cpp
         src/waveform.h src/waveform.cpp
         src/visualizer.h src/visualizer.cpp
         src/downloader.h src/downloader.cpp
         src/enricher.h src/enricher.cpp
+        src/windowfx.h src/windowfx.cpp
 )
 
 # Window icon, embedded so it also works uninstalled.
@@ -87,6 +113,17 @@ if(FLOW_MPRIS)
     target_compile_definitions(flow PRIVATE FLOW_MPRIS=1)
 endif()
 
+# WindowFx's blur backend (src/windowfx.cpp). The protocol's C interface tables need C.
+if(FLOW_WAYLAND_BLUR)
+    enable_language(C)
+    qt_generate_wayland_protocol_client_sources(flow FILES "${FLOW_BACKGROUND_EFFECT_XML}")
+    target_compile_definitions(flow PRIVATE FLOW_WAYLAND_BLUR=1)
+    target_link_libraries(flow PRIVATE Qt6::WaylandClient Qt6::GuiPrivate PkgConfig::FLOW_WAYLAND_CLIENT)
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_link_libraries(flow PRIVATE dwmapi)
+endif()
+
 # Headless front end: the same index, settings and yt-dlp backend, no window.
 # It drives the QML singletons (Library / Downloader / Enricher) directly, so it
 # links Qt6::Qml for their registrations but never starts an engine.
@@ -96,7 +133,7 @@ qt_add_executable(flow-cli
     src/enricher.h src/enricher.cpp
     src/downloader.h src/downloader.cpp
 )
-target_link_libraries(flow-cli PRIVATE flowcore Qt6::Network Qt6::Qml)
+target_link_libraries(flow-cli PRIVATE flowcore Qt6::Network Qt6::Qml Qt6::Multimedia)
 target_compile_definitions(flow-cli PRIVATE FLOW_VERSION="${PROJECT_VERSION}")
 set_target_properties(flow-cli PROPERTIES WIN32_EXECUTABLE OFF)
 
@@ -128,6 +165,13 @@ if(FLOW_BUILD_TESTS)
         src/library.h src/library.cpp src/enricher.h src/enricher.cpp)
     target_link_libraries(tst_library PRIVATE flowcore Qt6::Network Qt6::Qml Qt6::Test)
     add_test(NAME tst_library COMMAND tst_library)
+
+    # The full-sound chain is pure maths, so its EQ/compression/limiter can be
+    # tested without an audio device.
+    qt_add_executable(tst_mastering tests/tst_mastering.cpp src/mastering.h src/mastering.cpp)
+    target_include_directories(tst_mastering PRIVATE src)
+    target_link_libraries(tst_mastering PRIVATE Qt6::Test)
+    add_test(NAME tst_mastering COMMAND tst_mastering)
 
     qt_add_executable(tst_visualizer tests/tst_visualizer.cpp src/visualizer.h src/visualizer.cpp)
     target_include_directories(tst_visualizer PRIVATE src)
@@ -170,7 +214,8 @@ if(FLOW_BUILD_TESTS)
     # Integration: real scan + QMediaPlayer playback (plays a few seconds of silence).
     qt_add_executable(tst_player tests/tst_player.cpp
         src/library.h src/library.cpp src/player.h src/player.cpp src/waveform.h src/waveform.cpp
-        src/visualizer.h src/visualizer.cpp src/enricher.h src/enricher.cpp)
+        src/visualizer.h src/visualizer.cpp src/enricher.h src/enricher.cpp
+        src/mastering.h src/mastering.cpp src/mixer.h src/mixer.cpp)
     target_link_libraries(tst_player PRIVATE flowcore Qt6::Network Qt6::Multimedia Qt6::Qml Qt6::Test)
     add_test(NAME tst_player COMMAND tst_player)
     set_tests_properties(tst_player PROPERTIES TIMEOUT 90)
@@ -182,6 +227,7 @@ if(FLOW_MPRIS)
         src/library.h src/library.cpp src/player.h src/player.cpp src/waveform.h src/waveform.cpp
         src/visualizer.h src/visualizer.cpp
         src/enricher.h src/enricher.cpp
+        src/mastering.h src/mastering.cpp src/mixer.h src/mixer.cpp
         src/mpris.h src/mpris.cpp)
     target_link_libraries(tst_mpris PRIVATE flowcore Qt6::Network Qt6::Multimedia Qt6::Qml Qt6::DBus Qt6::Test)
     if(DBUS_RUN_SESSION)

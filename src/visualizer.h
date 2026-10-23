@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QAudioBuffer>
-#include <QAudioBufferOutput>
 #include <QList>
 #include <QMutex>
 #include <QObject>
@@ -13,16 +12,16 @@
 #include <vector>
 
 // Live analysis of what QMediaPlayer is playing, for the now-playing
-// visualizer. The decoded PCM is tapped with QAudioBufferOutput (Qt 6.8+,
-// ffmpeg backend), downmixed to mono and kept in a ring buffer; every frame a
-// 2048-point FFT is folded into kBands log-spaced levels and the newest samples
-// into a min/max oscilloscope trace. Smoothing happens here, not in QML, so the
-// display gets a steady 60 Hz stream of ready-to-draw numbers.
+// visualizer. The decoded PCM is downmixed to mono and kept in a ring buffer;
+// every frame a 2048-point FFT is folded into kBands log-spaced levels and the
+// newest samples into a min/max oscilloscope trace. Smoothing happens here, not
+// in QML, so the display gets a steady 60 Hz stream of ready-to-draw numbers.
 //
-// The tap delivers a pointer into the decoder's own buffer, which is recycled
-// as soon as the signal returns, so samples are copied out in a *direct*
-// connection (on the decoder thread, under m_mutex) rather than in a queued
-// one. The frame timer then snapshots the ring and analyses it lock-free.
+// Player owns the QAudioBufferOutput tap and calls append() directly from the
+// renderer thread: the buffer points into the decoder's own frame, which is
+// recycled as soon as the signal returns, so samples are copied out under
+// m_mutex rather than queued. The frame timer then snapshots the ring and
+// analyses it lock-free.
 //
 // Pure maths (the window -> bands/trace part) is static so it can be tested
 // without an audio device.
@@ -46,8 +45,8 @@ public:
     explicit Visualizer(QObject *parent = nullptr);
     ~Visualizer() override;
 
-    // Hand this to QMediaPlayer::setAudioBufferOutput().
-    QAudioBufferOutput *output() { return &m_tap; }
+    // Called on the renderer thread with the decoded buffer (tap format).
+    void append(const QAudioBuffer &buffer);
 
     QVariantList spectrum() const { return m_spectrum; }
     QVariantList scope() const { return m_scopeList; }
@@ -66,14 +65,12 @@ signals:
     void activeChanged();
 
 private:
-    void onBuffer(const QAudioBuffer &buffer);
     void onFrame();         // 60 Hz: analyse, smooth, publish
 
     // Both run with m_mutex held.
     void appendSamples(const QAudioBuffer &buffer);
     void latestWindow(int frames, std::vector<float> &out) const;
 
-    QAudioBufferOutput m_tap;
     QTimer m_frameTimer;
 
     mutable QMutex m_mutex;     // guards the ring and the buffer age

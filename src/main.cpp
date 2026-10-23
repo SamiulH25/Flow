@@ -84,6 +84,8 @@ int main(int argc, char *argv[])
     Downloader::setInstance(&downloader);
     Enricher::setInstance(&enricher);
 
+    // Translucent presets (Theme.surfaceAlpha < 1) need an alpha surface; this must precede window creation.
+    QQuickWindow::setDefaultAlphaBuffer(true);
     QQmlApplicationEngine engine;
     QObject::connect(
         &engine, &QQmlApplicationEngine::warnings,
