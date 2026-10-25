@@ -84,10 +84,10 @@ void Mixer::setVolume(float volume)
         m_sink->setVolume(m_volume);
 }
 
-void Mixer::setEq(const std::vector<Mastering::Band> &bands, float preampDb)
+void Mixer::setEq(const std::vector<Equalizer::Band> &bands, float preampDb)
 {
     QMutexLocker lock(&m_mutex);
-    m_mastering.setEq(bands, preampDb);
+    m_equalizer.setEq(bands, preampDb);
 }
 
 void Mixer::suspend()
@@ -108,7 +108,7 @@ void Mixer::flush()
         QMutexLocker lock(&m_mutex);
         m_read = 0;
         m_count = 0;
-        m_mastering.reset();
+        m_equalizer.reset();
     }
     // QAudioSink::reset() stops the stream for good on the PulseAudio backend
     // (reset() == stop + discard), and a stopped sink never pulls again. Close
@@ -165,7 +165,7 @@ void Mixer::stopSink()
         QMutexLocker lock(&m_mutex);
         m_read = 0;
         m_count = 0;
-        m_mastering.reset();
+        m_equalizer.reset();
     }
     m_startRequested = false;
     m_started = false;
@@ -192,7 +192,7 @@ void Mixer::process(const QAudioBuffer &buffer)
     m_scratch.resize(size_t(frames) * 2);
     std::memcpy(m_scratch.data(), buffer.constData<float>(),
                 m_scratch.size() * sizeof(float));
-    m_mastering.process(m_scratch.data(), frames);
+    m_equalizer.process(m_scratch.data(), frames);
 
     // Overflow means the sink stopped consuming (a stalled device): drop the
     // oldest audio rather than let the output drift further behind the clock.

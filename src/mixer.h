@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mastering.h"
+#include "equalizer.h"
 
 #include <QAudioDevice>
 #include <QAudioFormat>
@@ -14,10 +14,10 @@ class QAudioBuffer;
 class QAudioSink;
 class QIODevice;
 
-// The output stage for the "full sound" mode: QMediaPlayer keeps decoding (and
-// keeps the clock), but its own output is muted and the decoded PCM is tapped
-// before its volume stage. This class runs that tap through Mastering and
-// plays the result on its own QAudioSink.
+// The output stage for the equalizer profiles: QMediaPlayer keeps decoding
+// (and keeps the clock), but its own output is muted and the decoded PCM is
+// tapped before its volume stage. This class runs that tap through the selected
+// Equalizer profile and plays the result on its own QAudioSink.
 //
 // Two streams on the same device share one clock, so the tap's rate and the
 // sink's consumption stay together; the ring only exists to absorb the
@@ -37,7 +37,7 @@ public:
     void setDevice(const QAudioDevice &device);
     void setVolume(float volume);
     // The tone stage for the current device profile; safe while playing.
-    void setEq(const std::vector<Mastering::Band> &bands, float preampDb);
+    void setEq(const std::vector<Equalizer::Band> &bands, float preampDb);
     void suspend();
     void resume();
     void flush();                   // seek / track change: drop what is queued
@@ -68,7 +68,7 @@ private:
     std::vector<float> m_scratch;   // tap copy, so the buffer is never written
     int m_read = 0;
     int m_count = 0;
-    Mastering m_mastering;
+    Equalizer m_equalizer;
 
     std::atomic_bool m_enabled{false};
     std::atomic_bool m_startRequested{false};

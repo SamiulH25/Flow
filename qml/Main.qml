@@ -1945,16 +1945,6 @@ ApplicationWindow {
                         topPadding: 4
                         bottomPadding: 2
                     }
-                    Text {
-                        visible: !Player.fullness
-                        width: parent.width - 16
-                        leftPadding: 8
-                        bottomPadding: 4
-                        text: "Turn FULL on to hear profiles"
-                        color: dim
-                        font.pixelSize: 10
-                        wrapMode: Text.WordWrap
-                    }
                     Repeater {
                         model: Player.audioProfileChoices
                         delegate: Rectangle {
@@ -2060,36 +2050,6 @@ ApplicationWindow {
                     delay: 400
                 }
                 }
-            // Full sound: EQ, compression and width on the decoded PCM. The
-            // player's own output is muted while it runs; a backend without a
-            // PCM tap falls back to plain output.
-            Rectangle {
-                id: fullPill
-                anchors.verticalCenter: parent.verticalCenter
-                visible: Player.hasTrack && !narrow
-                height: 22; width: fullLabel.implicitWidth + 16; radius: Theme.r(7)
-                color: Player.fullness && Player.fullnessActive ? acc : panel
-                border.color: Player.fullness && Player.fullnessActive ? acc : line2; border.width: Theme.bw
-                Text {
-                    id: fullLabel; anchors.centerIn: parent
-                    text: "FULL"
-                    font.pixelSize: 10; font.family: mono
-                    color: Player.fullness && Player.fullnessActive ? accText : soft
-                    font.bold: Player.fullness
-                }
-                HoverHandler { id: fullHover }
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: Player.fullness = !Player.fullness
-                }
-                ToolTip {
-                    visible: fullHover.hovered
-                    text: Player.fullnessActive
-                        ? "Full sound: tone profile, compression and width — click for plain output"
-                        : "Full sound needs the ffmpeg backend's audio tap; this session plays plain output"
-                    delay: 400
-                }
-            }
             }
         }
         Bevel { anchors.fill: parent; raised: true }   // taskbar-style edge; invisible unless the theme has a bevel

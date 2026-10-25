@@ -22,7 +22,7 @@ private slots:
                  QStringLiteral("jbuds"));
         QCOMPARE(matchAudioProfile(QStringLiteral("Built-in Audio Analog Stereo"),
                                    QStringLiteral("alsa_output.pci-0000_00_1f.3.analog-stereo")),
-                 QStringLiteral("house"));
+                 QStringLiteral("flat"));
 
         // Bluetooth sinks may carry the model in the id; matching is
         // case-insensitive and looks at both fields.
@@ -43,7 +43,7 @@ private slots:
             ids.insert(profile.id);
             QVERIFY(profile.bands.size() <= 12);
             QVERIFY(profile.preampDb <= 0.f);   // corrections only attenuate
-            for (const Mastering::Band &band : profile.bands) {
+            for (const Equalizer::Band &band : profile.bands) {
                 QVERIFY(band.fc > 0.f && band.fc < 20000.f);
                 QVERIFY(band.gainDb > -15.f && band.gainDb < 10.f);
                 QVERIFY(band.q > 0.f);

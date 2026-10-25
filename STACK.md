@@ -169,41 +169,41 @@ Settings + saved queue: `~/.config/Flow/Flow.conf`.
 - Loudness: the pass that draws the waveform also measures the track — RMS in
   dBFS and the highest sample — and caches both in the index. The now-playing
   panel shows them; the dock's MATCH chip turns a track louder than the target
-  down to meet it. Matching is still one-sided: the mixer below has a gain
-  stage, but a track-level boost would have to be applied per track and could
-  not be undone by the limiter without changing the sound, so quiet tracks are
-  left where the user put them and the library is levelled down instead.
+  down to meet it. Matching is deliberately one-sided: `QMediaPlayer` clamps
+  volume to 0..1, so **a player cannot turn a track up past full scale**.
+  Matching levels the library down to the target and leaves quiet tracks where
+  the user put them.
 
-- Full sound (`Mixer` + `Mastering`): `QMediaPlayer` still decodes and still
-  owns the clock, but its `QAudioOutput` is muted and the decoded PCM is tapped
-  from `QAudioBufferOutput` *before* the output's volume stage. That tap is
-  pushed through the selected tone stage (the House curve by default — low
-  shelf 100 Hz +4 dB, presence 3.2 kHz +1.8 dB, air 11 kHz +1 dB), then
-  stereo-linked RMS compression (2:1, −22 dBFS, 6 dB makeup), mid/side width
-  ×1.10 and a peak limiter at −0.45 dBFS, and played on a second `QAudioSink`
-  at the tap's fixed format
-  (48 kHz stereo float). Two streams on one device share a clock, so the tap
-  rate and the sink's consumption do not drift; a 2 s ring absorbs the
-  renderer's bursts and drops the oldest audio if the sink stalls. A seek or a
-  track change closes that sink and lets the next tapped buffer reopen it:
-  `QAudioSink::reset()` is `stop + discard` on the PulseAudio backend, and a
-  stopped sink never pulls again, so "flush" cannot be implemented with it. The player's
-  own sink stays muted (its volume is zeroed too, so a fallback can never
-  blast). The dock's FULL chip toggles it.
-  Because the whole design leans on the ffmpeg backend's tap, a backend without
-  it (gstreamer) would otherwise play silence: on the first play the player
-  arms a 1.5 s watchdog, and if no buffer has reached the mixer it unmutes the
-  plain output, reports `fullnessActive` false and leaves the mode off for the
-  session. A sink that refuses to open takes the same exit. The tap leads the
-  player's clock by the backend's ~110 ms buffer and the mixer's sink adds its
-  own ~40–80 ms, so the mix is a few dozen ms ahead of `Player.position` —
-  inaudible for music and lyrics, and not compensated.
-  The chain is 48 kHz fixed: asking the tap for the device format would put a
-  resampler on every buffer and fork the DSP by sample format.
+- Equalizer (`Mixer` + `Equalizer`): `QMediaPlayer` still decodes and owns the
+  clock. When the selected profile has bands, its `QAudioOutput` is muted and
+  the decoded PCM is tapped from `QAudioBufferOutput` *before* the output's
+  volume stage. The tap goes through the profile's preamp and biquad bands and
+  is played on a second `QAudioSink` at 48 kHz stereo float. A profile is only
+  a curve: there is no compression, width or limiter, the preamp is chosen so
+  its boosts stay inside full scale, and a hard clamp is the last guard. Two
+  streams on one device share a clock, so the tap and the sink's consumption
+  do not drift; a 2 s ring absorbs the renderer's bursts and drops the oldest
+  audio if the sink stalls. A seek or a track change closes that sink and lets
+  the next tapped buffer reopen it: `QAudioSink::reset()` is `stop + discard`
+  on the PulseAudio backend, and a stopped sink never pulls again, so "flush"
+  cannot be implemented with it. The player's own sink stays muted (volume
+  zeroed too) while the mixer runs; with Flat, or an unmatched device, the
+  mixer is disabled and playback is direct.
+  Because the design leans on the ffmpeg backend's tap, a backend without it
+  (gstreamer) would otherwise play silence: on the first play the player arms
+  a 1.5 s watchdog, and if no buffer has reached the mixer it unmutes the
+  plain output and turns profiles off for the session. A sink that refuses to
+  open takes the same exit. The tap leads the player's clock by the backend's
+  ~110 ms buffer and the mixer's sink adds its own ~40–80 ms, so the output is
+  a few dozen ms ahead of `Player.position` — inaudible for music and lyrics,
+  and not compensated. The EQ runs at 48 kHz fixed: asking the tap for the
+  device format would put a resampler on every buffer and fork the DSP by
+  sample format.
 
-- Device sound profiles (`AudioProfiles`): the mixer's tone stage is a profile,
-  not a fixed curve. "house" is Flow's own tilt and the fallback; "flat"
-  bypasses the tone stage. The device entries come from published measurements:
+- Device profiles (`AudioProfiles`): the mixer's EQ is the selected profile.
+  "flat" is the default and the fallback for an unrecognised device; "house"
+  is Flow's own tilt and stays available as a manual pick. The device entries
+  come from published measurements:
   - SteelSeries Arctis Pro — AutoEQ fixed-band results from Rtings' B&K 5128
     measurement (Harman target), preamp -6.2 dB; the +GameDAC entry uses
     Rtings' HMS II.3 measurement of the DAC chain, preamp -2.3 dB. The Arctis
@@ -213,21 +213,20 @@ Settings + saved queue: `~/.config/Flow/Flow.conf`.
     from their preference curve; the profile is the inverse of that curve,
     fitted to eight bands (low shelf -8.9 dB at 100 Hz, -12 dB at 8.5 kHz,
     +1.5 dB at 500 Hz), RMS error 1.0 dB against the published points up to
-    12.5 kHz. Above that the lab data is not trustworthy enough to boost.
+    12.5 kHz. Preamp -3.5 dB for the +3 dB bands; above 12.5 kHz the lab data
+    is not trustworthy enough to boost.
   Auto matching looks for "arctis pro" + "gamedac", then "arctis pro", then
-  "jbuds lux" in the sink description and id (case-insensitive); the GameDAC
-  check comes first so it cannot fall through to the plain headset curve.
-  Anything else gets "house". The choice is per device: "Auto" is the default,
-  a manual pick is stored in `player/audioProfiles` under the sink id and
-  follows that sink across restarts. The selector lives at the bottom of the
-  audio-device popup in the dock. Profiles are part of the full-sound mixer, so
-  they need FULL on; the popup says so when it is off.
+  "arctis prime", then "jbuds lux" in the sink description and id
+  (case-insensitive; punctuation counts as a word break). Anything else is
+  "flat". The choice is per device: "Auto" is the default, a manual pick is
+  stored in `player/audioProfiles` under the sink id and follows that sink
+  across restarts. The selector lives at the bottom of the audio-device popup.
 
 Deliberately not done: a user-editable parametric EQ (the shipped profiles are
 one curve each), AcoustID fingerprinting, and any write-back of tags to files.
 
-Tests: `tst_mastering` (low-end vs presence balance, compression of a 20 dB
-step, transient limiting, silence), `tst_visualizer` (FFT bin placement, band
+Tests: `tst_equalizer` (band response, preamp, full-scale guard, silence),
+`tst_profiles` (device-name matching and the shipped table), `tst_visualizer` (FFT bin placement, band
 mapping, scope envelope, empty and unknown windows) and `tst_enricher` (matching rules, yt-dlp title shapes,
 compilations, store + survive a rescan, queue pacing, retry on 5xx) run against
 a fake backend, so neither needs a network connection.

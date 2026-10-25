@@ -20,7 +20,7 @@ Player::Player(Library *library, QObject *parent)
     , m_queue(this)
 {
     m_player.setAudioOutput(&m_audio);
-    // One tap feeds both the now-playing analyser and the full-sound mixer. It
+    // One tap feeds both the now-playing analyser and the equalizer mixer. It
     // sits before QAudioOutput's volume stage, so the mixer always sees the
     // decoded level, never the (muted) output's. Direct connections: the
     // buffer points into the decoder's frame and dies when the signal returns.
@@ -36,7 +36,7 @@ Player::Player(Library *library, QObject *parent)
     m_dspWatchdog.setSingleShot(true);
     m_dspWatchdog.setInterval(1500);
     connect(&m_dspWatchdog, &QTimer::timeout, this, [this] {
-        if (fullnessActive() && !m_mixer.running()
+        if (equalizerActive() && !m_mixer.running()
             && m_player.playbackState() == QMediaPlayer::PlayingState) {
             onMixerFailed();
         }
@@ -49,7 +49,6 @@ Player::Player(Library *library, QObject *parent)
     m_repeatMode = qBound(0, settings.value(QStringLiteral("player/repeatMode"), legacy).toInt(), 2);
     m_queue.setShuffled(settings.value(QStringLiteral("player/shuffle"), false).toBool());
     m_matchLoudness = settings.value(QStringLiteral("player/matchLoudness"), false).toBool();
-    m_fullness = settings.value(QStringLiteral("player/fullness"), true).toBool();
     m_audioDeviceId = settings.value(QStringLiteral("player/audioDevice")).toString();
     m_profileChoices = settings.value(QStringLiteral("player/audioProfiles")).toMap();
     m_profileChoicesUi.append(QVariantMap{
@@ -201,7 +200,7 @@ void Player::saveSettings() const
     settings.remove(QStringLiteral("player/repeat"));
     settings.setValue(QStringLiteral("player/shuffle"), m_queue.isShuffled());
     settings.setValue(QStringLiteral("player/matchLoudness"), m_matchLoudness);
-    settings.setValue(QStringLiteral("player/fullness"), m_fullness);
+    settings.remove(QStringLiteral("player/fullness"));   // the full-sound chain is gone
     settings.setValue(QStringLiteral("player/audioDevice"), m_audioDeviceId);
     settings.setValue(QStringLiteral("player/audioProfiles"), m_profileChoices);
 }
@@ -243,7 +242,7 @@ void Player::applyMatch()
     m_matchGain = gain;
     const float volume = outputVolume(m_volume, gain);
 
-    if (fullnessActive()) {
+    if (equalizerActive()) {
         // The player's own sink is only a clock now; the mixer owns the sound.
         m_audio.setMuted(true);
         m_audio.setVolume(0.0f);
@@ -257,19 +256,6 @@ void Player::applyMatch()
     emit matchChanged();
 }
 
-void Player::setFullness(bool on)
-{
-    if (on == m_fullness)
-        return;
-    m_fullness = on;
-    if (on)
-        m_dspFailed = false;   // the last failure may have been a missing device
-    m_mixer.flush();
-    applyMatch();
-    saveSettings();
-    emit fullnessChanged();
-}
-
 void Player::onMixerFailed()
 {
     if (m_dspFailed)
@@ -277,21 +263,28 @@ void Player::onMixerFailed()
     m_dspFailed = true;
     m_mixer.setEnabled(false);
     applyMatch();   // unmute the player, plain output
-    qWarning("flow: audio tap unavailable; full sound is off for this session");
-    emit fullnessChanged();
+    qWarning("flow: audio tap unavailable; equalizer profiles are off for this session");
 }
 
 void Player::armDspWatchdog()
 {
-    if (fullnessActive() && !m_mixer.running())
+    if (equalizerActive() && !m_mixer.running())
         m_dspWatchdog.start();
+}
+
+bool Player::equalizerActive() const
+{
+    if (m_dspFailed)
+        return false;
+    const AudioProfile *profile = ::audioProfile(audioProfile());
+    return profile && !profile->bands.empty();
 }
 
 void Player::onPlaybackStateChanged()
 {
     switch (m_player.playbackState()) {
     case QMediaPlayer::PlayingState:
-        if (fullnessActive()) {
+        if (equalizerActive()) {
             m_mixer.resume();
             armDspWatchdog();
         }
@@ -690,7 +683,6 @@ void Player::updateAudioDevice(bool force)
         m_audio.setDevice(targetDevice);
         m_mixer.setDevice(targetDevice);
         applyAudioProfile();
-        applyMatch();
         emit audioDeviceChanged();
     }
 }
@@ -756,8 +748,10 @@ QString Player::audioProfileName() const
 void Player::applyAudioProfile()
 {
     const AudioProfile *profile = ::audioProfile(audioProfile());
-    m_mixer.setEq(profile ? profile->bands : std::vector<Mastering::Band>{},
+    m_mixer.flush();
+    m_mixer.setEq(profile ? profile->bands : std::vector<Equalizer::Band>{},
                   profile ? profile->preampDb : 0.f);
+    applyMatch();   // mute/enable the mixer only when the profile has bands
     emit audioProfileChanged();
 }
 

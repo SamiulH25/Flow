@@ -2,13 +2,13 @@
 
 #include <vector>
 
-// The tone/level stage for the full-sound mixer: a configurable set of biquad
-// bands (the selected device profile), RMS compression, stereo width and a
-// peak limiter. The bands are built once by setEq() and never allocated while
-// process() runs.
+// The EQ stage of the mixer: a configurable set of biquad bands (the selected
+// device profile). The bands are built once by setEq() and never allocated
+// while process() runs. There is no compression or width: this stage only
+// shapes the tone and keeps the peaks inside full scale.
 //
 // Pure maths, no Qt, and deterministic: the tests drive it directly.
-class Mastering
+class Equalizer
 {
 public:
     enum class BandType { Peaking, LowShelf, HighShelf };
@@ -21,7 +21,7 @@ public:
         float q = 1.f;        // peaking only; shelves use a fixed slope (S = 1)
     };
 
-    Mastering();
+    Equalizer() = default;
 
     // Replaces the tone stage. `preampDb` is applied before the bands, as
     // AutoEQ presets expect (their positive corrections need the headroom).
@@ -46,6 +46,4 @@ private:
 
     std::vector<StereoBand> m_eq;
     float m_preamp = 1.f;
-    float m_envSq = 0.f;    // RMS detector, mean square
-    float m_limitEnv = 0.f; // limiter envelope, linear peak
 };

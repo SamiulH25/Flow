@@ -22,8 +22,8 @@ class QJSEngine;
 class QQmlEngine;
 
 // Playback engine: QMediaPlayer (ffmpeg backend) driven by a PlayQueue, with
-// the decoded PCM tapped through Mixer for the "full sound" mode. Times are
-// exposed to QML in seconds.
+// the decoded PCM tapped through Mixer when an equalizer profile is selected.
+// Times are exposed to QML in seconds.
 class Player : public QObject
 {
     Q_OBJECT
@@ -53,8 +53,6 @@ class Player : public QObject
     Q_PROPERTY(bool visualizerActive READ visualizerActive NOTIFY visualizerChanged)
     Q_PROPERTY(bool matchLoudness READ matchLoudness WRITE setMatchLoudness NOTIFY matchChanged)
     Q_PROPERTY(qreal matchGain READ matchGain NOTIFY matchChanged)   // <= 1: we can only turn down
-    Q_PROPERTY(bool fullness READ fullness WRITE setFullness NOTIFY fullnessChanged)
-    Q_PROPERTY(bool fullnessActive READ fullnessActive NOTIFY fullnessChanged)
     Q_PROPERTY(QString loudnessText READ loudnessText NOTIFY matchChanged)
     Q_PROPERTY(QVariantList audioDevices READ audioDevices NOTIFY audioDevicesChanged)
     Q_PROPERTY(QString audioDevice READ audioDevice WRITE setAudioDevice NOTIFY audioDeviceChanged)
@@ -108,11 +106,6 @@ public:
     bool matchLoudness() const { return m_matchLoudness; }
     void setMatchLoudness(bool on);
     qreal matchGain() const { return m_matchGain; }
-    bool fullness() const { return m_fullness; }
-    void setFullness(bool on);
-    // True while the tap actually feeds the mixer (a backend without
-    // QAudioBufferOutput support falls back to plain output).
-    bool fullnessActive() const { return m_fullness && !m_dspFailed; }
     QString loudnessText() const;
     QVariantList audioDevices() const;
     QString audioDevice() const { return m_audioDeviceId; }
@@ -160,7 +153,6 @@ signals:
     void peaksChanged();   // explicit jumps only, not normal progress
     void visualizerChanged();
     void matchChanged();
-    void fullnessChanged();
     void audioDeviceChanged();
     void audioDevicesChanged();
     void audioProfileChanged();
@@ -187,6 +179,9 @@ private:
     void armDspWatchdog();
     QString deviceProfileKey() const;
     void applyAudioProfile();
+    // A profile with bands is selected and the tap/sink work: the mixer owns
+    // the sound, the player's own output is muted.
+    bool equalizerActive() const;
 
     static inline Player *s_instance = nullptr;
 
@@ -215,7 +210,6 @@ private:
     bool m_matchLoudness = false;
     float m_matchGain = 1.0f;
     QString m_audioDeviceId;
-    bool m_fullness = true;
     bool m_dspFailed = false;   // no tap / no sink: plain output for this session
     QTimer m_dspWatchdog;
     QVariantList m_profileChoicesUi;   // built once: auto + every profile
