@@ -16,9 +16,13 @@ ships a headless CLI. Built for Wayland (Hyprland), with a custom QML interface.
 - **Mixes:** create, rename and reorder mixes; M3U import and export.
 - **Visualizer:** live 48-band spectrum and oscilloscope in the now-playing panel.
 - **Waveform and loudness:** cached per track in the index.
-- **Full sound:** the decoded PCM runs through a weight/presence EQ, RMS
-  compression, a touch of stereo width and a limiter before it reaches the
-  sound card. The dock's FULL chip A/Bs it against plain output.
+- **Full sound:** the decoded PCM runs through an EQ, RMS compression, a touch
+  of stereo width and a limiter before it reaches the sound card. The dock's
+  FULL chip A/Bs it against plain output.
+- **Device sound profiles:** the tone stage follows the output device — built-in
+  curves for the SteelSeries Arctis Pro (and GameDAC) and JLab JBuds Lux, with
+  Auto matching by device name and a per-device manual override in the audio
+  menu.
 - **Navidrome:** browse and stream a Subsonic server. Nothing is copied to disk.
 - **Downloads:** YouTube / YouTube Music links via `yt-dlp` (optional).
 - **Metadata enrichment:** MusicBrainz and Cover Art Archive, stored in the

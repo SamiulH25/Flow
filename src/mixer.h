@@ -36,6 +36,8 @@ public:
     void setEnabled(bool on);
     void setDevice(const QAudioDevice &device);
     void setVolume(float volume);
+    // The tone stage for the current device profile; safe while playing.
+    void setEq(const std::vector<Mastering::Band> &bands, float preampDb);
     void suspend();
     void resume();
     void flush();                   // seek / track change: drop what is queued

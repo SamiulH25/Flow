@@ -1,17 +1,31 @@
 #pragma once
 
-// The "full sound" chain: a fixed mastering pass applied to every frame on its
-// way to the sound card. Weight below 100 Hz, presence around 3 kHz, a little
-// air, RMS compression for density, a touch of stereo width, and a limiter so
-// the boosts cannot clip. It is a taste, not a reference monitor chain: one
-// setting that makes a normal library sound closer and less thin.
+#include <vector>
+
+// The tone/level stage for the full-sound mixer: a configurable set of biquad
+// bands (the selected device profile), RMS compression, stereo width and a
+// peak limiter. The bands are built once by setEq() and never allocated while
+// process() runs.
 //
 // Pure maths, no Qt, and deterministic: the tests drive it directly.
 class Mastering
 {
 public:
+    enum class BandType { Peaking, LowShelf, HighShelf };
+
+    struct Band
+    {
+        BandType type = BandType::Peaking;
+        float fc = 1000.f;
+        float gainDb = 0.f;
+        float q = 1.f;        // peaking only; shelves use a fixed slope (S = 1)
+    };
+
     Mastering();
 
+    // Replaces the tone stage. `preampDb` is applied before the bands, as
+    // AutoEQ presets expect (their positive corrections need the headroom).
+    void setEq(const std::vector<Band> &bands, float preampDb);
     void reset();
     // `frames` interleaved stereo pairs (48 kHz), modified in place.
     void process(float *frames, int count);
@@ -22,18 +36,16 @@ private:
         float b0 = 1.f, b1 = 0.f, b2 = 0.f, a1 = 0.f, a2 = 0.f;
         float z1 = 0.f, z2 = 0.f;
 
-        void normalise(double nb0, double nb1, double nb2, double na0,
-                       double na1, double na2);
-        void lowShelf(float f0, float db);
-        void peaking(float f0, float db, float q);
-        void highShelf(float f0, float db);
+        void configure(const Band &band);
         float run(float x);
     };
+    struct StereoBand
+    {
+        Biquad ch[2];
+    };
 
-    Biquad m_low[2];        // left, right: the same curve, separate state
-    Biquad m_presence[2];
-    Biquad m_air[2];
-
+    std::vector<StereoBand> m_eq;
+    float m_preamp = 1.f;
     float m_envSq = 0.f;    // RMS detector, mean square
     float m_limitEnv = 0.f; // limiter envelope, linear peak
 };

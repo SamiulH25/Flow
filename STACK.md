@@ -177,10 +177,11 @@ Settings + saved queue: `~/.config/Flow/Flow.conf`.
 - Full sound (`Mixer` + `Mastering`): `QMediaPlayer` still decodes and still
   owns the clock, but its `QAudioOutput` is muted and the decoded PCM is tapped
   from `QAudioBufferOutput` *before* the output's volume stage. That tap is
-  pushed through a fixed chain — low shelf (100 Hz, +4 dB), presence bell
-  (3.2 kHz, +1.8 dB), air shelf (11 kHz, +1 dB), stereo-linked RMS compression
-  (2:1, −22 dBFS, 6 dB makeup), mid/side width ×1.10 and a peak limiter at
-  −0.45 dBFS — then played on a second `QAudioSink` at the tap's fixed format
+  pushed through the selected tone stage (the House curve by default — low
+  shelf 100 Hz +4 dB, presence 3.2 kHz +1.8 dB, air 11 kHz +1 dB), then
+  stereo-linked RMS compression (2:1, −22 dBFS, 6 dB makeup), mid/side width
+  ×1.10 and a peak limiter at −0.45 dBFS, and played on a second `QAudioSink`
+  at the tap's fixed format
   (48 kHz stereo float). Two streams on one device share a clock, so the tap
   rate and the sink's consumption do not drift; a 2 s ring absorbs the
   renderer's bursts and drops the oldest audio if the sink stalls. A seek or a
@@ -200,8 +201,29 @@ Settings + saved queue: `~/.config/Flow/Flow.conf`.
   The chain is 48 kHz fixed: asking the tap for the device format would put a
   resampler on every buffer and fork the DSP by sample format.
 
-Deliberately not done: a user-editable EQ (the chain is one taste, not a
-parametric EQ), AcoustID fingerprinting, and any write-back of tags to files.
+- Device sound profiles (`AudioProfiles`): the mixer's tone stage is a profile,
+  not a fixed curve. "house" is Flow's own tilt and the fallback; "flat"
+  bypasses the tone stage. The device entries come from published measurements:
+  - SteelSeries Arctis Pro — AutoEQ fixed-band results from Rtings' B&K 5128
+    measurement (Harman target), preamp -6.2 dB; the +GameDAC entry uses
+    Rtings' HMS II.3 measurement of the DAC chain, preamp -2.3 dB. Ten peaking
+    bands each, Q 1.41, exactly as AutoEQ publishes them.
+  - JLab JBuds Lux — SoundGuys publishes the measured response as a deviation
+    from their preference curve; the profile is the inverse of that curve,
+    fitted to eight bands (low shelf -8.9 dB at 100 Hz, -12 dB at 8.5 kHz,
+    +1.5 dB at 500 Hz), RMS error 1.0 dB against the published points up to
+    12.5 kHz. Above that the lab data is not trustworthy enough to boost.
+  Auto matching looks for "arctis pro" + "gamedac", then "arctis pro", then
+  "jbuds lux" in the sink description and id (case-insensitive); the GameDAC
+  check comes first so it cannot fall through to the plain headset curve.
+  Anything else gets "house". The choice is per device: "Auto" is the default,
+  a manual pick is stored in `player/audioProfiles` under the sink id and
+  follows that sink across restarts. The selector lives at the bottom of the
+  audio-device popup in the dock. Profiles are part of the full-sound mixer, so
+  they need FULL on; the popup says so when it is off.
+
+Deliberately not done: a user-editable parametric EQ (the shipped profiles are
+one curve each), AcoustID fingerprinting, and any write-back of tags to files.
 
 Tests: `tst_mastering` (low-end vs presence balance, compression of a 20 dB
 step, transient limiting, silence), `tst_visualizer` (FFT bin placement, band

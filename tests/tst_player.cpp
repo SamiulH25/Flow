@@ -326,6 +326,38 @@ private slots:
         p.setAudioDevice(QString());
     }
 
+    void audioProfileSelection()
+    {
+        Player &p = *m_player;
+        QCOMPARE(p.audioProfileChoice(), QStringLiteral("auto"));
+        const QString autoProfile = p.audioProfile();
+        QVERIFY(!autoProfile.isEmpty());
+
+        QSignalSpy spy(&p, &Player::audioProfileChanged);
+        p.setAudioProfileChoice(QStringLiteral("flat"));
+        QCOMPARE(p.audioProfileChoice(), QStringLiteral("flat"));
+        QCOMPARE(p.audioProfile(), QStringLiteral("flat"));
+        QCOMPARE(spy.count(), 1);
+
+        auto settings = flowSettings();
+        QVERIFY(settings.value(QStringLiteral("player/audioProfiles")).toMap().values()
+                        .contains(QStringLiteral("flat")));
+
+        // Per-device choices survive a restart, like the queue does.
+        m_player.reset();
+        m_player = std::make_unique<Player>(m_lib.get());
+        Player &q = *m_player;
+        QCOMPARE(q.audioProfileChoice(), QStringLiteral("flat"));
+        QCOMPARE(q.audioProfile(), QStringLiteral("flat"));
+
+        q.setAudioProfileChoice(QStringLiteral("auto"));
+        QCOMPARE(q.audioProfileChoice(), QStringLiteral("auto"));
+        QCOMPARE(q.audioProfile(), autoProfile);
+
+        q.setAudioProfileChoice(QStringLiteral("no-such-profile"));   // ignored
+        QCOMPARE(q.audioProfileChoice(), QStringLiteral("auto"));
+    }
+
     void cleanupTestCase()
     {
         m_player.reset();

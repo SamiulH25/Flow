@@ -1870,7 +1870,7 @@ ApplicationWindow {
             y: -height - 10
             width: 270
             padding: 8
-            contentHeight: Math.min(devCol.implicitHeight, 320)
+            contentHeight: Math.min(devCol.implicitHeight, 400)
             background: Rectangle {
                 color: panel
                 border.color: line2
@@ -1934,6 +1934,70 @@ ApplicationWindow {
                             }
                         }
                     }
+                    Rectangle { width: parent.width; height: 1; color: line2 }
+                    Text {
+                        text: "SOUND PROFILE"
+                        font.pixelSize: 9
+                        font.family: mono
+                        font.bold: true
+                        color: dim
+                        leftPadding: 8
+                        topPadding: 4
+                        bottomPadding: 2
+                    }
+                    Text {
+                        visible: !Player.fullness
+                        width: parent.width - 16
+                        leftPadding: 8
+                        bottomPadding: 4
+                        text: "Turn FULL on to hear profiles"
+                        color: dim
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                    }
+                    Repeater {
+                        model: Player.audioProfileChoices
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: parent.width
+                            height: 28
+                            radius: Theme.r(6)
+                            color: modelData.id === Player.audioProfileChoice ? Theme.sel
+                                 : profHover.containsMouse ? line : "transparent"
+                            MouseArea {
+                                id: profHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Player.audioProfileChoice = modelData.id
+                            }
+                            Row {
+                                anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
+                                spacing: 8
+                                Rectangle {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 6; height: 6; radius: Theme.r(3)
+                                    color: modelData.id === Player.audioProfileChoice ? acc : "transparent"
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width - 20
+                                    text: modelData.id === "auto"
+                                        ? modelData.name + " · " + Player.audioProfileName
+                                        : modelData.name
+                                    color: modelData.id === Player.audioProfileChoice ? ink : soft
+                                    font.bold: modelData.id === Player.audioProfileChoice
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            ToolTip {
+                                visible: profHover.hovered
+                                text: modelData.note
+                                delay: 500
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1955,7 +2019,7 @@ ApplicationWindow {
                 icon: /headphone|bud|airpod|ear/i.test(Player.currentAudioDevice) ? "headphones" : "speaker"
                 iconSize: 16
                 lit: devicePopup.opened || Player.audioDevice !== ""
-                tip: "Audio: " + Player.currentAudioDevice
+                tip: "Audio: " + Player.currentAudioDevice + " · " + Player.audioProfileName
                 onClicked: { volPopup.close(); devicePopup.opened ? devicePopup.close() : devicePopup.open() }
             }
             // narrow docks: the slider moves into a popup behind this button
@@ -2021,7 +2085,7 @@ ApplicationWindow {
                 ToolTip {
                     visible: fullHover.hovered
                     text: Player.fullnessActive
-                        ? "Fuller sound: weight, presence, compression and width — click for plain output"
+                        ? "Full sound: tone profile, compression and width — click for plain output"
                         : "Full sound needs the ffmpeg backend's audio tap; this session plays plain output"
                     delay: 400
                 }

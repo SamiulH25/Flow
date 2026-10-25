@@ -91,6 +91,7 @@ qt_add_qml_module(flow
     SOURCES
         src/library.h src/library.cpp
         src/player.h src/player.cpp
+        src/audioprofiles.h src/audioprofiles.cpp
         src/mastering.h src/mastering.cpp
         src/mixer.h src/mixer.cpp
         src/waveform.h src/waveform.cpp
@@ -168,10 +169,18 @@ if(FLOW_BUILD_TESTS)
 
     # The full-sound chain is pure maths, so its EQ/compression/limiter can be
     # tested without an audio device.
-    qt_add_executable(tst_mastering tests/tst_mastering.cpp src/mastering.h src/mastering.cpp)
+    qt_add_executable(tst_mastering tests/tst_mastering.cpp
+        src/mastering.h src/mastering.cpp src/audioprofiles.h src/audioprofiles.cpp)
     target_include_directories(tst_mastering PRIVATE src)
     target_link_libraries(tst_mastering PRIVATE Qt6::Test)
     add_test(NAME tst_mastering COMMAND tst_mastering)
+
+    # Device-name matching and the shipped profile table; no engine needed.
+    qt_add_executable(tst_profiles tests/tst_profiles.cpp
+        src/mastering.h src/mastering.cpp src/audioprofiles.h src/audioprofiles.cpp)
+    target_include_directories(tst_profiles PRIVATE src)
+    target_link_libraries(tst_profiles PRIVATE Qt6::Test)
+    add_test(NAME tst_profiles COMMAND tst_profiles)
 
     # The mixer's sink lifecycle (needs an output device; the test skips without one).
     qt_add_executable(tst_mixer tests/tst_mixer.cpp
@@ -222,7 +231,8 @@ if(FLOW_BUILD_TESTS)
     qt_add_executable(tst_player tests/tst_player.cpp
         src/library.h src/library.cpp src/player.h src/player.cpp src/waveform.h src/waveform.cpp
         src/visualizer.h src/visualizer.cpp src/enricher.h src/enricher.cpp
-        src/mastering.h src/mastering.cpp src/mixer.h src/mixer.cpp)
+        src/mastering.h src/mastering.cpp src/mixer.h src/mixer.cpp
+        src/audioprofiles.h src/audioprofiles.cpp)
     target_link_libraries(tst_player PRIVATE flowcore Qt6::Network Qt6::Multimedia Qt6::Qml Qt6::Test)
     add_test(NAME tst_player COMMAND tst_player)
     set_tests_properties(tst_player PROPERTIES TIMEOUT 90)
@@ -235,6 +245,7 @@ if(FLOW_MPRIS)
         src/visualizer.h src/visualizer.cpp
         src/enricher.h src/enricher.cpp
         src/mastering.h src/mastering.cpp src/mixer.h src/mixer.cpp
+        src/audioprofiles.h src/audioprofiles.cpp
         src/mpris.h src/mpris.cpp)
     target_link_libraries(tst_mpris PRIVATE flowcore Qt6::Network Qt6::Multimedia Qt6::Qml Qt6::DBus Qt6::Test)
     if(DBUS_RUN_SESSION)

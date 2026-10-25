@@ -7,16 +7,6 @@ namespace {
 
 constexpr float kRate = 48000.f;
 
-// The curve. Small enough to stay out of the way on good masters, large enough
-// to remove the thin, far-away sound of a laptop or earbud mix.
-constexpr float kLowHz = 100.f;        // weight/body
-constexpr float kLowDb = 4.f;
-constexpr float kPresenceHz = 3200.f;  // vocals and guitars step forward
-constexpr float kPresenceDb = 1.8f;
-constexpr float kPresenceQ = 0.8f;
-constexpr float kAirHz = 11000.f;      // detail, not sizzle
-constexpr float kAirDb = 1.f;
-
 // Compression is what makes the result feel close rather than just brighter:
 // it raises the average level, and the makeup gain gives it back after the
 // peaks have been tamed.
@@ -39,76 +29,79 @@ inline float dbToLinear(float db)
 
 } // namespace
 
-Mastering::Mastering()
+Mastering::Mastering() = default;
+
+void Mastering::setEq(const std::vector<Band> &bands, float preampDb)
 {
-    for (int c = 0; c < 2; ++c) {
-        m_low[c].lowShelf(kLowHz, kLowDb);
-        m_presence[c].peaking(kPresenceHz, kPresenceDb, kPresenceQ);
-        m_air[c].highShelf(kAirHz, kAirDb);
+    m_eq.assign(bands.size(), {});
+    for (size_t i = 0; i < bands.size(); ++i) {
+        m_eq[i].ch[0].configure(bands[i]);
+        m_eq[i].ch[1].configure(bands[i]);
     }
+    m_preamp = dbToLinear(preampDb);
+    reset();
 }
 
 void Mastering::reset()
 {
-    for (int c = 0; c < 2; ++c) {
-        m_low[c].z1 = m_low[c].z2 = 0.f;
-        m_presence[c].z1 = m_presence[c].z2 = 0.f;
-        m_air[c].z1 = m_air[c].z2 = 0.f;
+    for (StereoBand &band : m_eq) {
+        for (Biquad &ch : band.ch)
+            ch.z1 = ch.z2 = 0.f;
     }
     m_envSq = 0.f;
     m_limitEnv = 0.f;
 }
 
-void Mastering::Biquad::normalise(double nb0, double nb1, double nb2, double na0,
-                                  double na1, double na2)
+// RBJ cookbook shelves and bell, normalised and stored in transposed direct
+// form II (run()). Shelves use a slope of S = 1; their Q field is ignored.
+void Mastering::Biquad::configure(const Band &band)
 {
+    const double A = std::pow(10.0, band.gainDb / 40.0);
+    const double w0 = 2.0 * M_PI * band.fc / kRate;
+    const double cw = std::cos(w0), sw = std::sin(w0);
+    double nb0, nb1, nb2, na0, na1, na2;
+
+    switch (band.type) {
+    case BandType::Peaking: {
+        const double q = std::max(0.05, double(band.q));
+        const double alpha = sw / (2.0 * q);
+        nb0 = 1 + alpha * A;
+        nb1 = -2 * cw;
+        nb2 = 1 - alpha * A;
+        na0 = 1 + alpha / A;
+        na1 = -2 * cw;
+        na2 = 1 - alpha / A;
+        break;
+    }
+    case BandType::LowShelf: {
+        const double alpha = sw / 2.0 * std::sqrt(2.0);
+        const double sa = 2.0 * std::sqrt(A) * alpha;
+        nb0 = A * ((A + 1) - (A - 1) * cw + sa);
+        nb1 = 2 * A * ((A - 1) - (A + 1) * cw);
+        nb2 = A * ((A + 1) - (A - 1) * cw - sa);
+        na0 = (A + 1) + (A - 1) * cw + sa;
+        na1 = -2 * ((A - 1) + (A + 1) * cw);
+        na2 = (A + 1) + (A - 1) * cw - sa;
+        break;
+    }
+    case BandType::HighShelf: {
+        const double alpha = sw / 2.0 * std::sqrt(2.0);
+        const double sa = 2.0 * std::sqrt(A) * alpha;
+        nb0 = A * ((A + 1) + (A - 1) * cw + sa);
+        nb1 = -2 * A * ((A - 1) + (A + 1) * cw);
+        nb2 = A * ((A + 1) + (A - 1) * cw - sa);
+        na0 = (A + 1) - (A - 1) * cw + sa;
+        na1 = 2 * ((A - 1) - (A + 1) * cw);
+        na2 = (A + 1) - (A - 1) * cw - sa;
+        break;
+    }
+    }
+
     b0 = float(nb0 / na0);
     b1 = float(nb1 / na0);
     b2 = float(nb2 / na0);
     a1 = float(na1 / na0);
     a2 = float(na2 / na0);
-}
-
-// RBJ cookbook shelves and bell, normalised and stored in transposed direct
-// form II (run()).
-void Mastering::Biquad::lowShelf(float f0, float db)
-{
-    const double A = std::pow(10.0, db / 40.0);
-    const double w0 = 2.0 * M_PI * f0 / kRate;
-    const double cw = std::cos(w0), sw = std::sin(w0);
-    const double alpha = sw / 2.0 * std::sqrt(2.0);   // shelf slope S = 1
-    const double sa = 2.0 * std::sqrt(A) * alpha;
-    normalise(A * ((A + 1) - (A - 1) * cw + sa),
-              2 * A * ((A - 1) - (A + 1) * cw),
-              A * ((A + 1) - (A - 1) * cw - sa),
-              (A + 1) + (A - 1) * cw + sa,
-              -2 * ((A - 1) + (A + 1) * cw),
-              (A + 1) + (A - 1) * cw - sa);
-}
-
-void Mastering::Biquad::peaking(float f0, float db, float q)
-{
-    const double A = std::pow(10.0, db / 40.0);
-    const double w0 = 2.0 * M_PI * f0 / kRate;
-    const double cw = std::cos(w0), sw = std::sin(w0);
-    const double alpha = sw / (2.0 * q);
-    normalise(1 + alpha * A, -2 * cw, 1 - alpha * A,
-              1 + alpha / A, -2 * cw, 1 - alpha / A);
-}
-
-void Mastering::Biquad::highShelf(float f0, float db)
-{
-    const double A = std::pow(10.0, db / 40.0);
-    const double w0 = 2.0 * M_PI * f0 / kRate;
-    const double cw = std::cos(w0), sw = std::sin(w0);
-    const double alpha = sw / 2.0 * std::sqrt(2.0);   // shelf slope S = 1
-    const double sa = 2.0 * std::sqrt(A) * alpha;
-    normalise(A * ((A + 1) + (A - 1) * cw + sa),
-              -2 * A * ((A - 1) + (A + 1) * cw),
-              A * ((A + 1) + (A - 1) * cw - sa),
-              (A + 1) - (A - 1) * cw + sa,
-              2 * ((A - 1) - (A + 1) * cw),
-              (A + 1) - (A - 1) * cw - sa);
 }
 
 float Mastering::Biquad::run(float x)
@@ -128,12 +121,12 @@ void Mastering::process(float *frames, int count)
     const float limitRelease = std::exp(-1.f / (kLimitReleaseMs * 0.001f * kRate));
 
     for (int i = 0; i < count; ++i) {
-        float l = m_low[0].run(frames[i * 2]);
-        float r = m_low[1].run(frames[i * 2 + 1]);
-        l = m_presence[0].run(l);
-        r = m_presence[1].run(r);
-        l = m_air[0].run(l);
-        r = m_air[1].run(r);
+        float l = frames[i * 2] * m_preamp;
+        float r = frames[i * 2 + 1] * m_preamp;
+        for (StereoBand &band : m_eq) {
+            l = band.ch[0].run(l);
+            r = band.ch[1].run(r);
+        }
 
         // Stereo-linked RMS: both channels share one gain, so the image does
         // not wobble while the detector decides.

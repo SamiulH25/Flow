@@ -84,6 +84,12 @@ void Mixer::setVolume(float volume)
         m_sink->setVolume(m_volume);
 }
 
+void Mixer::setEq(const std::vector<Mastering::Band> &bands, float preampDb)
+{
+    QMutexLocker lock(&m_mutex);
+    m_mastering.setEq(bands, preampDb);
+}
+
 void Mixer::suspend()
 {
     if (m_sink)

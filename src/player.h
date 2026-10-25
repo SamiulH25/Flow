@@ -1,5 +1,6 @@
 #pragma once
 
+#include "audioprofiles.h"
 #include "lyrics.h"
 #include "mixer.h"
 #include "playqueue.h"
@@ -58,6 +59,10 @@ class Player : public QObject
     Q_PROPERTY(QVariantList audioDevices READ audioDevices NOTIFY audioDevicesChanged)
     Q_PROPERTY(QString audioDevice READ audioDevice WRITE setAudioDevice NOTIFY audioDeviceChanged)
     Q_PROPERTY(QString currentAudioDevice READ currentAudioDevice NOTIFY audioDeviceChanged)
+    Q_PROPERTY(QVariantList audioProfileChoices READ audioProfileChoices CONSTANT)
+    Q_PROPERTY(QString audioProfileChoice READ audioProfileChoice WRITE setAudioProfileChoice NOTIFY audioProfileChanged)
+    Q_PROPERTY(QString audioProfile READ audioProfile NOTIFY audioProfileChanged)
+    Q_PROPERTY(QString audioProfileName READ audioProfileName NOTIFY audioProfileChanged)
 
 public:
     explicit Player(Library *library, QObject *parent = nullptr);
@@ -114,6 +119,13 @@ public:
     void setAudioDevice(const QString &id);
     QString currentAudioDevice() const;
     Q_INVOKABLE void selectAudioDevice(const QString &id) { setAudioDevice(id); }
+    // "auto" follows the output device's name; anything else pins a profile
+    // for the current device (remembered per device).
+    QVariantList audioProfileChoices() const { return m_profileChoicesUi; }
+    QString audioProfileChoice() const;
+    void setAudioProfileChoice(const QString &id);
+    QString audioProfile() const;       // the resolved profile id
+    QString audioProfileName() const;
 
     // Replace the queue with `ids` (library track ids) and start at `start`.
     Q_INVOKABLE void playTracks(const QVariantList &ids, int start);
@@ -151,6 +163,7 @@ signals:
     void fullnessChanged();
     void audioDeviceChanged();
     void audioDevicesChanged();
+    void audioProfileChanged();
 
 private:
     void loadCurrent(bool autoplay);
@@ -172,6 +185,8 @@ private:
     void onPlaybackStateChanged();
     void onMixerFailed();
     void armDspWatchdog();
+    QString deviceProfileKey() const;
+    void applyAudioProfile();
 
     static inline Player *s_instance = nullptr;
 
@@ -203,4 +218,6 @@ private:
     bool m_fullness = true;
     bool m_dspFailed = false;   // no tap / no sink: plain output for this session
     QTimer m_dspWatchdog;
+    QVariantList m_profileChoicesUi;   // built once: auto + every profile
+    QVariantMap m_profileChoices;      // device key -> profile id (absent = auto)
 };

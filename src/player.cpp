@@ -51,6 +51,19 @@ Player::Player(Library *library, QObject *parent)
     m_matchLoudness = settings.value(QStringLiteral("player/matchLoudness"), false).toBool();
     m_fullness = settings.value(QStringLiteral("player/fullness"), true).toBool();
     m_audioDeviceId = settings.value(QStringLiteral("player/audioDevice")).toString();
+    m_profileChoices = settings.value(QStringLiteral("player/audioProfiles")).toMap();
+    m_profileChoicesUi.append(QVariantMap{
+        {QStringLiteral("id"), QStringLiteral("auto")},
+        {QStringLiteral("name"), QStringLiteral("Auto")},
+        {QStringLiteral("note"), QStringLiteral("Follow the output device name.")},
+    });
+    for (const AudioProfile &profile : audioProfiles()) {
+        m_profileChoicesUi.append(QVariantMap{
+            {QStringLiteral("id"), profile.id},
+            {QStringLiteral("name"), profile.name},
+            {QStringLiteral("note"), profile.note},
+        });
+    }
     updateAudioDevice(true);
     connect(&m_mediaDevices, &QMediaDevices::audioOutputsChanged, this, &Player::onAudioOutputsChanged);
     applyMatch();   // no track yet: sets the plain slider volume
@@ -190,6 +203,7 @@ void Player::saveSettings() const
     settings.setValue(QStringLiteral("player/matchLoudness"), m_matchLoudness);
     settings.setValue(QStringLiteral("player/fullness"), m_fullness);
     settings.setValue(QStringLiteral("player/audioDevice"), m_audioDeviceId);
+    settings.setValue(QStringLiteral("player/audioProfiles"), m_profileChoices);
 }
 
 void Player::setVolume(qreal volume)
@@ -675,6 +689,7 @@ void Player::updateAudioDevice(bool force)
     if (!targetDevice.isNull() && (force || m_audio.device() != targetDevice)) {
         m_audio.setDevice(targetDevice);
         m_mixer.setDevice(targetDevice);
+        applyAudioProfile();
         applyMatch();
         emit audioDeviceChanged();
     }
@@ -694,6 +709,56 @@ void Player::setAudioDevice(const QString &id)
     saveSettings();
     updateAudioDevice(true);
     emit audioDevicesChanged();
+}
+
+QString Player::deviceProfileKey() const
+{
+    const QByteArray id = m_audio.device().id();
+    return id.isEmpty() ? QStringLiteral("default") : QString::fromUtf8(id);
+}
+
+QString Player::audioProfileChoice() const
+{
+    const QString choice = m_profileChoices.value(deviceProfileKey()).toString();
+    return choice.isEmpty() ? QStringLiteral("auto") : choice;
+}
+
+void Player::setAudioProfileChoice(const QString &id)
+{
+    if (id != QLatin1String("auto") && !::audioProfile(id))
+        return;
+    const QString key = deviceProfileKey();
+    if (id == QLatin1String("auto"))
+        m_profileChoices.remove(key);
+    else
+        m_profileChoices.insert(key, id);
+    applyAudioProfile();
+    saveSettings();
+}
+
+QString Player::audioProfile() const
+{
+    const QString choice = audioProfileChoice();
+    if (choice != QLatin1String("auto") && ::audioProfile(choice))
+        return choice;
+    return matchAudioProfile(m_audio.device().description(),
+                             QString::fromUtf8(m_audio.device().id()));
+}
+
+QString Player::audioProfileName() const
+{
+    const QString id = audioProfile();
+    if (const AudioProfile *profile = ::audioProfile(id))
+        return profile->name;
+    return id;
+}
+
+void Player::applyAudioProfile()
+{
+    const AudioProfile *profile = ::audioProfile(audioProfile());
+    m_mixer.setEq(profile ? profile->bands : std::vector<Mastering::Band>{},
+                  profile ? profile->preampDb : 0.f);
+    emit audioProfileChanged();
 }
 
 QString Player::currentAudioDevice() const

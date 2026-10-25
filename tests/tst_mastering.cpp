@@ -1,3 +1,4 @@
+#include "audioprofiles.h"
 #include "mastering.h"
 
 #include <QtTest>
@@ -9,11 +10,15 @@ namespace {
 
 constexpr int kRate = 48000;
 
-// Runs a tone through a fresh chain and returns the settled tail: the filters
-// and the compressor need a moment before the level is meaningful.
-std::vector<float> renderTone(double hz, double amp, double seconds, double skip = 0.75)
+using Band = Mastering::Band;
+
+// Runs a tone through a fresh chain with `bands` and returns the settled tail:
+// the filters and the compressor need a moment before the level is meaningful.
+std::vector<float> renderTone(const std::vector<Band> &bands, double hz, double amp,
+                              double seconds, double skip = 0.75)
 {
     Mastering mastering;
+    mastering.setEq(bands, 0.f);
     const int frames = int(kRate * seconds);
     std::vector<float> buf(size_t(frames) * 2);
     for (int i = 0; i < frames; ++i) {
@@ -43,6 +48,11 @@ double peak(const std::vector<float> &x)
     return p;
 }
 
+const std::vector<Band> &houseBands()
+{
+    return audioProfile(QStringLiteral("house"))->bands;
+}
+
 } // namespace
 
 class TestMastering : public QObject
@@ -57,10 +67,24 @@ private slots:
         // stage lifts 8 kHz. (At a normal level the 2:1 compressor halves any
         // pre-compression difference; compressionShrinksDynamics covers that.)
         const double inRms = 0.02 / std::sqrt(2.0);
-        const double lowGain = 20.0 * std::log10(rms(renderTone(60, 0.02, 2.0)) / inRms);
-        const double highGain = 20.0 * std::log10(rms(renderTone(8000, 0.02, 2.0)) / inRms);
+        const double lowGain =
+                20.0 * std::log10(rms(renderTone(houseBands(), 60, 0.02, 2.0)) / inRms);
+        const double highGain =
+                20.0 * std::log10(rms(renderTone(houseBands(), 8000, 0.02, 2.0)) / inRms);
         QVERIFY(lowGain > 8.0);              // 6 dB makeup + the shelf
         QVERIFY(lowGain - highGain > 2.0);   // weight, not just level
+    }
+
+    void profileBandsShapeTheTone()
+    {
+        // This is how a device profile works: a -12 dB band at 8 kHz must pull
+        // an 8 kHz tone down by about 12 dB, without touching the compressor.
+        const double flat = rms(renderTone({}, 8000, 0.02, 2.0));
+        const std::vector<Band> cut = {{Mastering::BandType::Peaking, 8000.f, -12.f, 1.2f}};
+        const double shaped = rms(renderTone(cut, 8000, 0.02, 2.0));
+        const double delta = 20.0 * std::log10(shaped / flat);
+        QVERIFY(delta < -10.0);
+        QVERIFY(delta > -14.0);
     }
 
     void compressionShrinksDynamics()
@@ -68,6 +92,7 @@ private slots:
         // 20 dB step: 1 s loud, 1 s quiet. The compressor is slow on purpose,
         // so measure the settled half of each segment.
         Mastering mastering;
+        mastering.setEq(houseBands(), 0.f);
         const int frames = kRate * 2;
         std::vector<float> buf(size_t(frames) * 2);
         for (int i = 0; i < frames; ++i) {
@@ -91,9 +116,10 @@ private slots:
 
     void limiterHoldsTransients()
     {
-        // Silence, then a full-scale tone. The 15 ms RMS detector cannot react
+        // Silence, then a full-scale tone. The 30 ms RMS detector cannot react
         // to the attack; the limiter must keep the output under the ceiling.
         Mastering mastering;
+        mastering.setEq(houseBands(), 0.f);
         const int frames = kRate;
         std::vector<float> buf(size_t(frames) * 2, 0.f);
         for (int i = frames / 2; i < frames; ++i) {
@@ -112,6 +138,7 @@ private slots:
     void silenceStaysSilent()
     {
         Mastering mastering;
+        mastering.setEq(houseBands(), 0.f);
         std::vector<float> buf(2048, 0.f);
         mastering.process(buf.data(), 1024);
         for (float v : buf)
