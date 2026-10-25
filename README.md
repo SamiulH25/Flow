@@ -17,9 +17,10 @@ ships a headless CLI. Built for Wayland (Hyprland), with a custom QML interface.
 - **Visualizer:** live 48-band spectrum and oscilloscope in the now-playing panel.
 - **Waveform and loudness:** cached per track in the index.
 - **Equalizer profiles:** the PCM is EQ'd to the selected curve — Flat by
-  default, Auto-matched corrections for the SteelSeries Arctis Pro, Pro +
-  GameDAC, Prime and JLab JBuds Lux, plus Flow's own House tilt. Per-device
-  manual overrides live in the audio-device menu.
+  default, Auto-matched Reddit-sourced presets for the SteelSeries Arctis Pro
+  (also via GameDAC) and JLab JBuds Lux, a measured Arctis Prime curve, and
+  Flow's own House tilt. Per-device overrides and a 0-15 dB volume boost live
+  in the audio-device menu.
 - **Navidrome:** browse and stream a Subsonic server. Nothing is copied to disk.
 - **Downloads:** YouTube / YouTube Music links via `yt-dlp` (optional).
 - **Metadata enrichment:** MusicBrainz and Cover Art Archive, stored in the

@@ -202,25 +202,34 @@ Settings + saved queue: `~/.config/Flow/Flow.conf`.
 
 - Device profiles (`AudioProfiles`): the mixer's EQ is the selected profile.
   "flat" is the default and the fallback for an unrecognised device; "house"
-  is Flow's own tilt and stays available as a manual pick. The device entries
-  come from published measurements:
-  - SteelSeries Arctis Pro — AutoEQ fixed-band results from Rtings' B&K 5128
-    measurement (Harman target), preamp -6.2 dB; the +GameDAC entry uses
-    Rtings' HMS II.3 measurement of the DAC chain, preamp -2.3 dB. The Arctis
-    Prime uses the HMS II.3 result for that headset (preamp -3.8 dB). Ten
-    peaking bands each, Q 1.41, exactly as AutoEQ publishes them.
-  - JLab JBuds Lux — SoundGuys publishes the measured response as a deviation
-    from their preference curve; the profile is the inverse of that curve,
-    fitted to eight bands (low shelf -8.9 dB at 100 Hz, -12 dB at 8.5 kHz,
-    +1.5 dB at 500 Hz), RMS error 1.0 dB against the published points up to
-    12.5 kHz. Preamp -3.5 dB for the +3 dB bands; above 12.5 kHz the lab data
-    is not trustworthy enough to boost.
-  Auto matching looks for "arctis pro" + "gamedac", then "arctis pro", then
-  "arctis prime", then "jbuds lux" in the sink description and id
-  (case-insensitive; punctuation counts as a word break). Anything else is
-  "flat". The choice is per device: "Auto" is the default, a manual pick is
-  stored in `player/audioProfiles` under the sink id and follows that sink
-  across restarts. The selector lives at the bottom of the audio-device popup.
+  is Flow's own tilt and stays available as a manual pick. The community
+  entries come from Reddit threads rather than lab targets:
+  - SteelSeries Arctis Pro — r/steelseries, "Arctis Pro + GameDAC (wired) EQ
+    settings": the reply that tailored the curve to the headset. 31 Hz +7.1,
+    62 +5, 125 +2, 250 +4, 500 +4.5, 1k +4.5, 2k +2.5, 4k +1.5, 8k +1,
+    16k +0.5 dB, Q 1.41, preamp -8.5 dB for the summed +8.2 dB peak. One
+    profile covers the GameDAC and the plain headset (same drivers); matching
+    "arctis pro" catches both sink names.
+  - JLab JBuds Lux — r/JLab, "the best eq settings for bringing more audio
+    clarity": the sliders in the screenshot, read as a smiley (31/62 +3.6,
+    125 +2.4, 250 -1.3, 1k +1.1, 2k +3.6, 4-16k +6 dB, Q 1.41). The app does
+    not label its range, so the positions are mapped to ±6 dB; preamp -8 dB
+    for the summed +7.7 dB peak.
+  - SteelSeries Arctis Prime — Reddit has no preset for it, so it keeps the
+    AutoEQ result from Rtings' HMS II.3 measurement (preamp -3.8 dB).
+  Auto matching looks for "arctis pro", then "arctis prime", then "jbuds lux"
+  in the sink description and id (case-insensitive; punctuation counts as a
+  word break). Anything else is "flat". The choice is per device: "Auto" is
+  the default, a manual pick is stored in `player/audioProfiles` under the
+  sink id and follows that sink across restarts. The selector lives at the
+  bottom of the audio-device popup.
+
+- Volume boost (`Player::boost`): a 0-15 dB slider under the profiles, in half
+  dB steps, stored as `player/boostDb`. It is added to the profile's preamp
+  and runs through the same 48 kHz EQ path, so a boost works even with the
+  Flat profile (the mixer opens for the gain alone). There is no limiter: full
+  scale is a hard clamp by design, so loud material clips when boosted; the
+  popup says so. The default is 0 dB, which keeps the direct path.
 
 Deliberately not done: a user-editable parametric EQ (the shipped profiles are
 one curve each), AcoustID fingerprinting, and any write-back of tags to files.

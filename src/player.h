@@ -61,6 +61,7 @@ class Player : public QObject
     Q_PROPERTY(QString audioProfileChoice READ audioProfileChoice WRITE setAudioProfileChoice NOTIFY audioProfileChanged)
     Q_PROPERTY(QString audioProfile READ audioProfile NOTIFY audioProfileChanged)
     Q_PROPERTY(QString audioProfileName READ audioProfileName NOTIFY audioProfileChanged)
+    Q_PROPERTY(qreal boost READ boost WRITE setBoost NOTIFY boostChanged)   // dB above full scale
 
 public:
     explicit Player(Library *library, QObject *parent = nullptr);
@@ -119,6 +120,8 @@ public:
     void setAudioProfileChoice(const QString &id);
     QString audioProfile() const;       // the resolved profile id
     QString audioProfileName() const;
+    qreal boost() const { return m_boostDb; }
+    void setBoost(qreal db);
 
     // Replace the queue with `ids` (library track ids) and start at `start`.
     Q_INVOKABLE void playTracks(const QVariantList &ids, int start);
@@ -156,6 +159,7 @@ signals:
     void audioDeviceChanged();
     void audioDevicesChanged();
     void audioProfileChanged();
+    void boostChanged();
 
 private:
     void loadCurrent(bool autoplay);
@@ -179,7 +183,8 @@ private:
     void armDspWatchdog();
     QString deviceProfileKey() const;
     void applyAudioProfile();
-    // A profile with bands is selected and the tap/sink work: the mixer owns
+    void updateEqualizer();   // bands + preamp + boost, without stopping the sink
+    // A profile with bands (or a boost) is selected and the tap/sink work: the mixer owns
     // the sound, the player's own output is muted.
     bool equalizerActive() const;
 
@@ -214,4 +219,5 @@ private:
     QTimer m_dspWatchdog;
     QVariantList m_profileChoicesUi;   // built once: auto + every profile
     QVariantMap m_profileChoices;      // device key -> profile id (absent = auto)
+    qreal m_boostDb = 0.0;             // the volume boost slider, 0..15 dB
 };

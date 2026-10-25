@@ -51,6 +51,7 @@ Player::Player(Library *library, QObject *parent)
     m_matchLoudness = settings.value(QStringLiteral("player/matchLoudness"), false).toBool();
     m_audioDeviceId = settings.value(QStringLiteral("player/audioDevice")).toString();
     m_profileChoices = settings.value(QStringLiteral("player/audioProfiles")).toMap();
+    m_boostDb = qBound(0.0, settings.value(QStringLiteral("player/boostDb"), 0.0).toDouble(), 15.0);
     m_profileChoicesUi.append(QVariantMap{
         {QStringLiteral("id"), QStringLiteral("auto")},
         {QStringLiteral("name"), QStringLiteral("Auto")},
@@ -203,6 +204,7 @@ void Player::saveSettings() const
     settings.remove(QStringLiteral("player/fullness"));   // the full-sound chain is gone
     settings.setValue(QStringLiteral("player/audioDevice"), m_audioDeviceId);
     settings.setValue(QStringLiteral("player/audioProfiles"), m_profileChoices);
+    settings.setValue(QStringLiteral("player/boostDb"), m_boostDb);
 }
 
 void Player::setVolume(qreal volume)
@@ -276,6 +278,8 @@ bool Player::equalizerActive() const
 {
     if (m_dspFailed)
         return false;
+    if (m_boostDb > 0.01)
+        return true;
     const AudioProfile *profile = ::audioProfile(audioProfile());
     return profile && !profile->bands.empty();
 }
@@ -745,14 +749,31 @@ QString Player::audioProfileName() const
     return id;
 }
 
-void Player::applyAudioProfile()
+void Player::updateEqualizer()
 {
     const AudioProfile *profile = ::audioProfile(audioProfile());
-    m_mixer.flush();
     m_mixer.setEq(profile ? profile->bands : std::vector<Equalizer::Band>{},
-                  profile ? profile->preampDb : 0.f);
-    applyMatch();   // mute/enable the mixer only when the profile has bands
+                  float((profile ? profile->preampDb : 0.0) + m_boostDb));
+}
+
+void Player::applyAudioProfile()
+{
+    m_mixer.flush();
+    updateEqualizer();
+    applyMatch();   // mute/enable the mixer only when there is something to apply
     emit audioProfileChanged();
+}
+
+void Player::setBoost(qreal db)
+{
+    db = qBound(0.0, db, 15.0);
+    if (qFuzzyCompare(db + 1.0, m_boostDb + 1.0))
+        return;
+    m_boostDb = db;
+    updateEqualizer();
+    applyMatch();   // the boost alone keeps the mixer alive at 0 dB too
+    saveSettings();
+    emit boostChanged();
 }
 
 QString Player::currentAudioDevice() const

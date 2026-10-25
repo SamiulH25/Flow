@@ -170,6 +170,28 @@ ApplicationWindow {
         WheelHandler { onWheel: event => Player.volume = Player.volume + (event.angleDelta.y > 0 ? 0.05 : -0.05) }
     }
 
+    // Volume boost: gain above full scale for quiet tracks, 0..15 dB in half
+    // steps. The equalizer clamps at full scale, so loud material can clip.
+    component BoostBar: Item {
+        id: boostBar
+        width: 150; height: 16
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: Theme.r(2); color: Theme.track }
+        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width * (Player.boost / 15); height: 4; radius: Theme.r(2); color: soft }
+        function setFromX(x) {
+            const db = Math.round((Math.max(0, Math.min(width, x)) / width) * 15 * 2) / 2
+            Player.boost = db
+        }
+        MouseArea {
+            anchors.fill: parent
+            onPressed: mouse => setFromX(mouse.x)
+            onPositionChanged: mouse => { if (pressed) setFromX(mouse.x) }
+        }
+        WheelHandler {
+            onWheel: event => Player.boost = Math.max(0, Math.min(15,
+                Player.boost + (event.angleDelta.y > 0 ? 0.5 : -0.5)))
+        }
+    }
+
     // "Now playing" marker: three bars that dance while playing, rest when paused.
     component EqBars: Item {
         id: eq
@@ -1987,6 +2009,41 @@ ApplicationWindow {
                                 delay: 500
                             }
                         }
+                    }
+                    Rectangle { width: parent.width; height: 1; color: line2 }
+                    Text {
+                        text: "VOLUME BOOST"
+                        font.pixelSize: 9
+                        font.family: mono
+                        font.bold: true
+                        color: dim
+                        leftPadding: 8
+                        topPadding: 4
+                        bottomPadding: 2
+                    }
+                    Row {
+                        x: 8
+                        width: parent.width - 16
+                        spacing: 8
+                        BoostBar { width: parent.width - 64; anchors.verticalCenter: parent.verticalCenter }
+                        Text {
+                            width: 56
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: Player.boost > 0 ? "+" + Player.boost.toFixed(1) + " dB" : "0 dB"
+                            color: Player.boost > 0 ? acc : soft
+                            font.pixelSize: 10; font.family: mono
+                            horizontalAlignment: Text.AlignRight
+                        }
+                    }
+                    Text {
+                        visible: Player.boost > 0
+                        width: parent.width - 16
+                        leftPadding: 8
+                        bottomPadding: 4
+                        text: "Quiet tracks get louder; loud ones clip at full scale"
+                        color: dim
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
                     }
                 }
             }

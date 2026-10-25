@@ -14,34 +14,21 @@ const std::vector<Band> kHouse = {
     {Equalizer::BandType::HighShelf, 11000.f, 1.f, 0.707f},
 };
 
-// AutoEQ fixed-band result for Rtings' B&K 5128 measurement of the Arctis Pro,
-// Harman target. The mild +4.4 dB at 31 Hz and 16 kHz are the preset's own
-// extremes; the -6.2 dB preamp keeps them from clipping.
+// r/steelseries community preset for the Arctis Pro + GameDAC (the thread's
+// "better fit" reply): a bass- and mid-forward tuning rather than a measured
+// correction. Values are the SteelSeries Engine's 10 bands; preamp -8.5 dB
+// covers the summed +8.2 dB peak.
 const std::vector<Band> kArctisPro = {
-    {Equalizer::BandType::Peaking, 31.f, 4.4f, 1.41f},
-    {Equalizer::BandType::Peaking, 62.f, -1.6f, 1.41f},
-    {Equalizer::BandType::Peaking, 125.f, -5.7f, 1.41f},
-    {Equalizer::BandType::Peaking, 250.f, -0.6f, 1.41f},
-    {Equalizer::BandType::Peaking, 500.f, 1.9f, 1.41f},
-    {Equalizer::BandType::Peaking, 1000.f, 1.6f, 1.41f},
-    {Equalizer::BandType::Peaking, 2000.f, -1.1f, 1.41f},
-    {Equalizer::BandType::Peaking, 4000.f, 4.3f, 1.41f},
-    {Equalizer::BandType::Peaking, 8000.f, -3.3f, 1.41f},
-    {Equalizer::BandType::Peaking, 16000.f, 6.4f, 1.41f},
-};
-
-// Same headset through the GameDAC, as measured by Rtings on the HMS II.3 rig.
-const std::vector<Band> kArctisGameDac = {
-    {Equalizer::BandType::Peaking, 31.f, -1.f, 1.41f},
-    {Equalizer::BandType::Peaking, 62.f, 2.5f, 1.41f},
-    {Equalizer::BandType::Peaking, 125.f, -0.1f, 1.41f},
-    {Equalizer::BandType::Peaking, 250.f, -1.4f, 1.41f},
-    {Equalizer::BandType::Peaking, 500.f, -1.5f, 1.41f},
-    {Equalizer::BandType::Peaking, 1000.f, 0.4f, 1.41f},
-    {Equalizer::BandType::Peaking, 2000.f, 1.4f, 1.41f},
-    {Equalizer::BandType::Peaking, 4000.f, 2.2f, 1.41f},
-    {Equalizer::BandType::Peaking, 8000.f, -3.4f, 1.41f},
-    {Equalizer::BandType::Peaking, 16000.f, -2.6f, 1.41f},
+    {Equalizer::BandType::Peaking, 31.f, 7.1f, 1.41f},
+    {Equalizer::BandType::Peaking, 62.f, 5.f, 1.41f},
+    {Equalizer::BandType::Peaking, 125.f, 2.f, 1.41f},
+    {Equalizer::BandType::Peaking, 250.f, 4.f, 1.41f},
+    {Equalizer::BandType::Peaking, 500.f, 4.5f, 1.41f},
+    {Equalizer::BandType::Peaking, 1000.f, 4.5f, 1.41f},
+    {Equalizer::BandType::Peaking, 2000.f, 2.5f, 1.41f},
+    {Equalizer::BandType::Peaking, 4000.f, 1.5f, 1.41f},
+    {Equalizer::BandType::Peaking, 8000.f, 1.f, 1.41f},
+    {Equalizer::BandType::Peaking, 16000.f, 0.5f, 1.41f},
 };
 
 // SteelSeries Arctis Prime, AutoEQ fixed-band result from Rtings' HMS II.3
@@ -59,20 +46,21 @@ const std::vector<Band> kArctisPrime = {
     {Equalizer::BandType::Peaking, 16000.f, -4.2f, 1.41f},
 };
 
-// JLab JBuds Lux ANC. SoundGuys publishes the measured curve against their
-// preference curve, so this is the inverse of that deviation: the broad bass
-// lift (-9 dB below 100 Hz), the 5-10 kHz peak (down 12 dB at 8.5 kHz) and the
-// recessed mids (+1.5 dB at 500 Hz) are what the lab found. Fitted with eight
-// fixed bands; RMS error against the published curve is 1.0 dB.
+// JLab JBuds Lux ANC, from the r/JLab "best EQ for clarity" screenshot: the
+// app's 10 sliders read as a smiley — +3.6 dB bass, a small 250 Hz dip and the
+// 4-16 kHz sliders at maximum. The app does not label its scale; the positions
+// are mapped to ±6 dB, the range its other EQ controls use. Preamp -8 dB
+// covers the summed +7.7 dB peak.
 const std::vector<Band> kJbudsLux = {
-    {Equalizer::BandType::LowShelf, 100.f, -8.9f, 0.707f},
-    {Equalizer::BandType::Peaking, 200.f, -1.6f, 1.2f},
-    {Equalizer::BandType::Peaking, 500.f, 1.5f, 1.f},
-    {Equalizer::BandType::Peaking, 1250.f, 3.f, 1.5f},
-    {Equalizer::BandType::Peaking, 2200.f, -8.2f, 0.9f},
-    {Equalizer::BandType::Peaking, 3500.f, -1.2f, 1.5f},
-    {Equalizer::BandType::Peaking, 8500.f, -12.f, 1.2f},
-    {Equalizer::BandType::Peaking, 12000.f, 3.f, 1.2f},
+    {Equalizer::BandType::Peaking, 31.f, 3.6f, 1.41f},
+    {Equalizer::BandType::Peaking, 62.f, 3.6f, 1.41f},
+    {Equalizer::BandType::Peaking, 125.f, 2.4f, 1.41f},
+    {Equalizer::BandType::Peaking, 250.f, -1.3f, 1.41f},
+    {Equalizer::BandType::Peaking, 1000.f, 1.1f, 1.41f},
+    {Equalizer::BandType::Peaking, 2000.f, 3.6f, 1.41f},
+    {Equalizer::BandType::Peaking, 4000.f, 6.f, 1.41f},
+    {Equalizer::BandType::Peaking, 8000.f, 6.f, 1.41f},
+    {Equalizer::BandType::Peaking, 16000.f, 6.f, 1.41f},
 };
 
 } // namespace
@@ -81,25 +69,17 @@ const std::vector<AudioProfile> &audioProfiles()
 {
     static const std::vector<AudioProfile> profiles = {
         {
-            QStringLiteral("gamedac"),
-            QStringLiteral("SteelSeries Arctis Pro + GameDAC"),
-            QStringLiteral("AutoEQ / Rtings (HMS II.3): trims the 6 kHz peak, lifts 3.7 kHz."),
-            {QStringLiteral("arctis pro"), QStringLiteral("gamedac")},
-            kArctisGameDac,
-            -2.3f,
-        },
-        {
             QStringLiteral("arctis"),
             QStringLiteral("SteelSeries Arctis Pro"),
-            QStringLiteral("AutoEQ / Rtings (B&K 5128): trims the 125 Hz hump, lifts 4 kHz."),
+            QStringLiteral("r/steelseries preset: +7 dB sub-bass, +4.5 dB mids, gentle treble."),
             {QStringLiteral("arctis pro")},
             kArctisPro,
-            -6.2f,
+            -8.5f,
         },
         {
             QStringLiteral("arctis-prime"),
             QStringLiteral("SteelSeries Arctis Prime"),
-            QStringLiteral("AutoEQ / Rtings (HMS II.3): trims 8 kHz, lifts 2 kHz."),
+            QStringLiteral("AutoEQ / Rtings (HMS II.3) — Reddit has no preset for the Prime."),
             {QStringLiteral("arctis prime")},
             kArctisPrime,
             -3.8f,
@@ -107,10 +87,10 @@ const std::vector<AudioProfile> &audioProfiles()
         {
             QStringLiteral("jbuds"),
             QStringLiteral("JLab JBuds Lux"),
-            QStringLiteral("SoundGuys lab curve: -9 dB sub-bass, -12 dB at 8.5 kHz, mids lifted."),
+            QStringLiteral("r/JLab preset: bass lift, dipped 250 Hz, 4-16 kHz at maximum."),
             {QStringLiteral("jbuds lux")},
             kJbudsLux,
-            -3.5f,
+            -8.f,
         },
         {
             QStringLiteral("house"),
@@ -123,7 +103,7 @@ const std::vector<AudioProfile> &audioProfiles()
         {
             QStringLiteral("flat"),
             QStringLiteral("Flat"),
-            QStringLiteral("No tone correction; compression and width still apply."),
+            QStringLiteral("No tone correction: the raw output."),
             {},
             {},
             0.f,

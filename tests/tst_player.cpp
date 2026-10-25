@@ -358,6 +358,25 @@ private slots:
         QCOMPARE(q.audioProfileChoice(), QStringLiteral("auto"));
     }
 
+    void volumeBoost()
+    {
+        Player &p = *m_player;
+        QCOMPARE(p.boost(), 0.0);
+        QSignalSpy spy(&p, &Player::boostChanged);
+        p.setBoost(6.0);
+        QCOMPARE(p.boost(), 6.0);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(flowSettings().value(QStringLiteral("player/boostDb")).toDouble(), 6.0);
+
+        m_player.reset();
+        m_player = std::make_unique<Player>(m_lib.get());
+        QCOMPARE(m_player->boost(), 6.0);
+        m_player->setBoost(99.0);    // clamped to the slider's range
+        QCOMPARE(m_player->boost(), 15.0);
+        m_player->setBoost(-3.0);
+        QCOMPARE(m_player->boost(), 0.0);
+    }
+
     void cleanupTestCase()
     {
         m_player.reset();

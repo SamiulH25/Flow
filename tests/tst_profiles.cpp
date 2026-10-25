@@ -10,10 +10,10 @@ class TestProfiles : public QObject
 private slots:
     void deviceNamesResolveToProfiles()
     {
-        // The most specific name wins: the GameDAC must not fall through to
-        // the plain Arctis profile.
+        // One community curve covers the headset whether it is plugged into
+        // the GameDAC or straight into the PC.
         QCOMPARE(matchAudioProfile(QStringLiteral("SteelSeries Arctis Pro GameDAC"), QString()),
-                 QStringLiteral("gamedac"));
+                 QStringLiteral("arctis"));
         QCOMPARE(matchAudioProfile(QStringLiteral("SteelSeries Arctis Pro"), QString()),
                  QStringLiteral("arctis"));
         QCOMPARE(matchAudioProfile(QStringLiteral("SteelSeries Arctis Prime"), QString()),
@@ -51,7 +51,6 @@ private slots:
         }
         QVERIFY(audioProfile(QStringLiteral("house")));
         QVERIFY(audioProfile(QStringLiteral("flat")));
-        QVERIFY(audioProfile(QStringLiteral("gamedac")));
         QVERIFY(audioProfile(QStringLiteral("arctis")));
         QVERIFY(audioProfile(QStringLiteral("arctis-prime")));
         QVERIFY(audioProfile(QStringLiteral("jbuds")));
