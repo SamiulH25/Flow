@@ -16,6 +16,8 @@ private slots:
                  QStringLiteral("gamedac"));
         QCOMPARE(matchAudioProfile(QStringLiteral("SteelSeries Arctis Pro"), QString()),
                  QStringLiteral("arctis"));
+        QCOMPARE(matchAudioProfile(QStringLiteral("SteelSeries Arctis Prime"), QString()),
+                 QStringLiteral("arctis-prime"));
         QCOMPARE(matchAudioProfile(QStringLiteral("JLab JBuds Lux ANC"), QString()),
                  QStringLiteral("jbuds"));
         QCOMPARE(matchAudioProfile(QStringLiteral("Built-in Audio Analog Stereo"),
@@ -51,6 +53,7 @@ private slots:
         QVERIFY(audioProfile(QStringLiteral("flat")));
         QVERIFY(audioProfile(QStringLiteral("gamedac")));
         QVERIFY(audioProfile(QStringLiteral("arctis")));
+        QVERIFY(audioProfile(QStringLiteral("arctis-prime")));
         QVERIFY(audioProfile(QStringLiteral("jbuds")));
         QVERIFY(!audioProfile(QStringLiteral("nope")));
         QVERIFY(audioProfile(QStringLiteral("flat"))->bands.empty());

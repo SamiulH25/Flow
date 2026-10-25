@@ -206,8 +206,9 @@ Settings + saved queue: `~/.config/Flow/Flow.conf`.
   bypasses the tone stage. The device entries come from published measurements:
   - SteelSeries Arctis Pro — AutoEQ fixed-band results from Rtings' B&K 5128
     measurement (Harman target), preamp -6.2 dB; the +GameDAC entry uses
-    Rtings' HMS II.3 measurement of the DAC chain, preamp -2.3 dB. Ten peaking
-    bands each, Q 1.41, exactly as AutoEQ publishes them.
+    Rtings' HMS II.3 measurement of the DAC chain, preamp -2.3 dB. The Arctis
+    Prime uses the HMS II.3 result for that headset (preamp -3.8 dB). Ten
+    peaking bands each, Q 1.41, exactly as AutoEQ publishes them.
   - JLab JBuds Lux — SoundGuys publishes the measured response as a deviation
     from their preference curve; the profile is the inverse of that curve,
     fitted to eight bands (low shelf -8.9 dB at 100 Hz, -12 dB at 8.5 kHz,

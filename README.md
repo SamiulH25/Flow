@@ -20,7 +20,8 @@ ships a headless CLI. Built for Wayland (Hyprland), with a custom QML interface.
   of stereo width and a limiter before it reaches the sound card. The dock's
   FULL chip A/Bs it against plain output.
 - **Device sound profiles:** the tone stage follows the output device — built-in
-  curves for the SteelSeries Arctis Pro (and GameDAC) and JLab JBuds Lux, with
+  curves for the SteelSeries Arctis Pro (and GameDAC), Arctis Prime and JLab
+  JBuds Lux, with
   Auto matching by device name and a per-device manual override in the audio
   menu.
 - **Navidrome:** browse and stream a Subsonic server. Nothing is copied to disk.

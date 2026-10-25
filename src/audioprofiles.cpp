@@ -44,6 +44,21 @@ const std::vector<Band> kArctisGameDac = {
     {Mastering::BandType::Peaking, 16000.f, -2.6f, 1.41f},
 };
 
+// SteelSeries Arctis Prime, AutoEQ fixed-band result from Rtings' HMS II.3
+// measurement, Harman target.
+const std::vector<Band> kArctisPrime = {
+    {Mastering::BandType::Peaking, 31.f, 3.1f, 1.41f},
+    {Mastering::BandType::Peaking, 62.f, 3.f, 1.41f},
+    {Mastering::BandType::Peaking, 125.f, 0.3f, 1.41f},
+    {Mastering::BandType::Peaking, 250.f, -1.6f, 1.41f},
+    {Mastering::BandType::Peaking, 500.f, -0.3f, 1.41f},
+    {Mastering::BandType::Peaking, 1000.f, 1.6f, 1.41f},
+    {Mastering::BandType::Peaking, 2000.f, 3.7f, 1.41f},
+    {Mastering::BandType::Peaking, 4000.f, 0.2f, 1.41f},
+    {Mastering::BandType::Peaking, 8000.f, -7.2f, 1.41f},
+    {Mastering::BandType::Peaking, 16000.f, -4.2f, 1.41f},
+};
+
 // JLab JBuds Lux ANC. SoundGuys publishes the measured curve against their
 // preference curve, so this is the inverse of that deviation: the broad bass
 // lift (-9 dB below 100 Hz), the 5-10 kHz peak (down 12 dB at 8.5 kHz) and the
@@ -80,6 +95,14 @@ const std::vector<AudioProfile> &audioProfiles()
             {QStringLiteral("arctis pro")},
             kArctisPro,
             -6.2f,
+        },
+        {
+            QStringLiteral("arctis-prime"),
+            QStringLiteral("SteelSeries Arctis Prime"),
+            QStringLiteral("AutoEQ / Rtings (HMS II.3): trims 8 kHz, lifts 2 kHz."),
+            {QStringLiteral("arctis prime")},
+            kArctisPrime,
+            -3.8f,
         },
         {
             QStringLiteral("jbuds"),
